@@ -51,6 +51,8 @@
         { label: '名前付きグループ', wrap: ['(?<name>', ')'], desc: 'グループに名前を付けます。一致した内容を、番号の代わりに名前で取り出せます。name の部分を好きな名前に書き換えてください。', ex: ['(?<year>\\d{4})年', '2026年11月'] },
         { label: 'まとめるだけ', wrap: ['(?:', ')'], desc: '囲んだ部分をひとまとめにします。グループと違い、一致した内容は記録しません。繰り返しや「または」の範囲を決めるときに使います。', ex: ['(?:ab)+', 'ababab abx'] },
         { label: 'または', insert: '|', desc: '左右のどちらかに一致します。( ) の中で使うと、その ( ) の中だけで「どちらか」になります。', ex: ['cat|dog', 'cat and dog'] },
+        { label: '同じ文字列（番号）', insert: '\\1', select: [1, 2], desc: '1番のグループに一致した文字列と同じものに一致します（後方参照）。グループのパターンではなく、実際に一致した文字列を使います。数字の部分を、参照したいグループの番号に書き換えてください。', ex: ['\\b(\\w+)\\s+\\1\\b', 'this is is a test'] },
+        { label: '同じ文字列（名前）', insert: '\\k<name>', select: [3, 7], desc: '名前付きグループに一致した文字列と同じものに一致します（後方参照）。name の部分を、参照したいグループの名前に書き換えてください。', ex: ['(?<q>["\'])(.*?)\\k<q>', 'say "hi" and \'yo"'] },
         { label: '後ろに続く', wrap: ['(?=', ')'], desc: 'すぐ後ろに、囲んだ内容が続く位置に一致します。続く部分は確かめるだけで、一致した文字列には含めません。', ex: ['\\d+(?=円)', '100円 200ドル'] },
         { label: '後ろに続かない', wrap: ['(?!', ')'], desc: 'すぐ後ろに、囲んだ内容が続かない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['foo(?!bar)', 'foobar foobaz'] },
         { label: '前にある', wrap: ['(?<=', ')'], desc: 'すぐ前に、囲んだ内容がある位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<=¥)\\d+', '¥500 と 300円'] },
@@ -100,7 +102,7 @@
         b.addEventListener('mousedown', (e) => e.preventDefault());
         b.addEventListener('click', () => {
           if (item.wrap) wrapSelection(item.wrap[0], item.wrap[1]);
-          else insertText(item.insert);
+          else insertText(item.insert, item.select);
         });
         chips.append(b);
       }
@@ -187,11 +189,13 @@
     }
   }
 
-  function insertText(text) {
+  // select を渡すと、入れた文字列のその範囲を選んだ状態にする（書き換えてほしい部分を示すため）
+  function insertText(text, select) {
     const s = patternEl.selectionStart ?? patternEl.value.length;
     const e = patternEl.selectionEnd ?? s;
     replaceRange(s, e, text);
-    patternEl.setSelectionRange(s + text.length, s + text.length);
+    if (select) patternEl.setSelectionRange(s + select[0], s + select[1]);
+    else patternEl.setSelectionRange(s + text.length, s + text.length);
     update();
   }
 
