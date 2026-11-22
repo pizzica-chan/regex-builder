@@ -289,7 +289,7 @@ button:hover { border-color: var(--accent); }
     grid-template-rows: none;
     grid-template-areas: "tester" "meaning" "palette";
   }
-  /* 上に固定する欄を低くするため、フラグの説明は省き（マウスを乗せると title で出る）、フラグとボタンを 1 行ずつに収める */
+  /* 上に固定する欄を低くするため、フラグの短い説明は省き（マウスを乗せると詳しい説明が出る）、フラグとボタンを 1 行ずつに収める */
   .flag-desc { display: none; }
   .pattern-dock .panel { padding: 12px; }
   .pattern-tools { gap: 8px; margin-top: 8px; }
@@ -609,3 +609,6 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
   white-space: pre-wrap;
 }
 .tip-sample mark { background: var(--mark); color: inherit; border-radius: 3px; }
+.tip-sample mark.tip-next { margin-left: 2px; }
+.tip-count { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
+.tip-gap { height: 8px; }

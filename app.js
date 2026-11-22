@@ -69,6 +69,16 @@
     'rep-add': { label: '回数を指定して繰り返す', code: '{n,m}', desc: '直前の部品を、指定した回数だけ繰り返します。{3} はちょうど3回、{2,4} は2〜4回、{2,} は2回以上です。', ex: ['\\d{2,4}', '1 12 123 12345'] },
   };
 
+  // フラグの説明。cmp: [例のパターン, 例の文字列, 付けないときのフラグ, 付けたときのフラグ]。両方の一致を並べて見せる
+  const FLAG_TIPS = {
+    g: { label: 'すべての一致を探す', desc: '最初の一致で止めずに、文字列の中の一致をすべて探します。付けないと、最初の1つだけを見つけます。「行ごとに判定する」の判定には使いません。', cmp: ['\\d+', '10 個、20 個、30 個', '', 'g'] },
+    i: { label: '大文字と小文字を区別しない', desc: '英字の大文字と小文字を同じ文字として扱います。cat は Cat や CAT にも一致し、[a-z] は大文字にも一致します。', cmp: ['cat', 'cat Cat CAT', 'g', 'gi'] },
+    m: { label: '各行の先頭と末尾', desc: '^ と $ を文字列全体の先頭と末尾だけでなく、各行の先頭と末尾にも一致させます。付けないと、^ は文字列の最初、$ は文字列の最後にだけ一致します。', cmp: ['^\\d+', '1. りんご\n2. みかん\n3. ぶどう', 'g', 'gm'] },
+    s: { label: '. を改行にも一致させる', desc: '. を、改行を含むどんな文字にも一致させます。付けないと . は改行に一致しないので、行をまたいで一致させられません。', cmp: ['「.+」', '「1行目\n2行目」', 'g', 'gs'] },
+    u: { label: 'Unicode モード', desc: '\\p{…} で文字の種類（漢字やひらがななど）を指定できるようになり、絵文字のような文字も1文字として数えます。書き方の誤りを厳しく調べるので、付けないと通る書き方がエラーになることがあります。', cmp: ['\\p{Script=Han}+', '日本語の文章', 'g', 'gu'] },
+    y: { label: '位置を固定して探す', desc: '前の一致の終わり（最初は文字列の先頭）の位置でだけ一致を調べ、その先は探しません。一致が途切れたところで止まるので、先頭から続く部分だけを取り出せます。「行ごとに判定する」の判定には使いません。', cmp: ['[A-Z]\\d', 'A1B2C3 D4', 'g', 'gy'] },
+  };
+
   const PRESETS = [
     { name: '郵便番号（123-4567）', pattern: '^\\d{3}-\\d{4}$', flags: 'gm', test: '123-4567\n1234567\n12-34567\n100-0001' },
     { name: '携帯電話の番号', pattern: '^0[789]0-?\\d{4}-?\\d{4}$', flags: 'gm', test: '090-1234-5678\n08012345678\n03-1234-5678' },
@@ -140,33 +150,53 @@
   tipEl.hidden = true;
   document.body.append(tipEl);
 
-  // 例の文字列のうち、例のパターンに一致した部分に印を付ける
-  function exampleHtml(pattern, text) {
+  // 例の文字列のうち、例のパターンに一致した部分に印を付ける。g も y も無いときは最初の一致だけを探す
+  function exampleMatches(pattern, text, flags) {
+    const re = new RegExp(pattern, flags);
+    if (re.global) return [...text.matchAll(re)].filter((m) => m[0].length);
+    const m = re.exec(text);
+    return m && m[0].length ? [m] : [];
+  }
+
+  function exampleHtml(text, matches) {
     let html = '';
     let pos = 0;
-    for (const m of text.matchAll(new RegExp(pattern, 'g'))) {
-      if (!m[0].length) continue;
-      html += esc(text.slice(pos, m.index)) + `<mark>${esc(m[0])}</mark>`;
+    for (const m of matches) {
+      // 前の一致とすき間なく続く一致は、別の一致だと分かるように少し離す
+      const cls = pos && m.index === pos ? ' class="tip-next"' : '';
+      html += esc(text.slice(pos, m.index)) + `<mark${cls}>${esc(m[0])}</mark>`;
       pos = m.index + m[0].length;
     }
     return html + esc(text.slice(pos));
   }
 
+  function exampleBlock(label, pattern, text, flags, showCount) {
+    const matches = exampleMatches(pattern, text, flags);
+    const count = showCount ? `<span class="tip-count">${matches.length ? `${matches.length} 件` : '一致なし'}</span>` : '';
+    return `<div class="tip-ex"><span class="tip-ex-label">${label}</span><code>/${esc(pattern)}/${flags}</code>${count}</div>` +
+      `<div class="tip-sample">${exampleHtml(text, matches)}</div>`;
+  }
+
   function tipHtml(item, code) {
     let html = `<div class="tip-head"><strong>${esc(item.label)}</strong>${code ? `<code>${esc(code)}</code>` : ''}</div>`;
     html += `<p>${esc(item.desc)}</p>`;
-    if (item.ex) {
-      const [pattern, text] = item.ex;
-      html += `<div class="tip-ex"><span class="tip-ex-label">例</span><code>/${esc(pattern)}/g</code></div>`;
-      html += `<div class="tip-sample">${exampleHtml(pattern, text)}</div>`;
+    if (item.ex) html += exampleBlock('例', item.ex[0], item.ex[1], 'g', false);
+    if (item.cmp) {
+      const [pattern, text, off, on] = item.cmp;
+      html += exampleBlock('付けない', pattern, text, off, true);
+      html += `<div class="tip-gap"></div>` + exampleBlock('付ける', pattern, text, on, true);
     }
     return html;
   }
 
-  function showTip(target, item, code) {
+  // target の下に説明を出す。owner は読み上げ用に説明を結び付ける要素
+  function showTip(target, item, code, owner = target) {
     tipEl.innerHTML = tipHtml(item, code);
     tipEl.hidden = false;
-    target.setAttribute('aria-describedby', tipEl.id);
+    owner.setAttribute('aria-describedby', tipEl.id);
+    // 前に出した位置のままだと、右端に寄って幅が縮んだ状態で測ってしまうので、左上に戻してから測る
+    tipEl.style.left = '0px';
+    tipEl.style.top = '0px';
     const r = target.getBoundingClientRect();
     const gap = 8;
     const margin = 16;
@@ -180,19 +210,20 @@
     tipEl.style.top = `${top}px`;
   }
 
-  function hideTip(target) {
+  function hideTip(owner) {
     tipEl.hidden = true;
-    target.removeAttribute('aria-describedby');
+    owner.removeAttribute('aria-describedby');
   }
 
-  function attachTip(el, item, code) {
+  // focusEl を渡すと、el の中のその要素にフォーカスが来たときにも出す（フラグの label と checkbox のように）
+  function attachTip(el, item, code, focusEl = el) {
     if (!item.desc) return;
-    el.addEventListener('mouseenter', () => showTip(el, item, code));
-    el.addEventListener('focus', () => showTip(el, item, code));
-    el.addEventListener('mouseleave', () => hideTip(el));
-    el.addEventListener('blur', () => hideTip(el));
+    el.addEventListener('mouseenter', () => showTip(el, item, code, focusEl));
+    focusEl.addEventListener('focus', () => showTip(el, item, code, focusEl));
+    el.addEventListener('mouseleave', () => hideTip(focusEl));
+    focusEl.addEventListener('blur', () => hideTip(focusEl));
     // タッチ操作では mouseleave が起きないので、押したら閉じる
-    el.addEventListener('click', () => hideTip(el));
+    el.addEventListener('click', () => hideTip(focusEl));
   }
 
   window.addEventListener('scroll', () => { tipEl.hidden = true; }, { passive: true });
@@ -245,6 +276,7 @@
 
   function setupCustomParts() {
     for (const [id, tip] of Object.entries(BUTTON_TIPS)) attachTip($(id), tip, tip.code);
+    for (const box of flagBoxes) attachTip(box.closest('label'), FLAG_TIPS[box.value], box.value, box);
     for (const id of ['literal-add', 'class-add', 'class-neg-add', 'rep-add']) {
       $(id).addEventListener('mousedown', (e) => e.preventDefault());
     }
