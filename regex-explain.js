@@ -18,6 +18,10 @@
     let i = 0;
     let groupCount = 0;
     const unicode = flags.includes('u') || flags.includes('v');
+    // u フラグがなく、名前付きグループが 1 つもないとき、JavaScript は \k を文字の k として扱う
+    const hasNamedGroups = /\(\?<(?![=!])/.test(src);
+    const groupNames = [];
+    const namedRefs = [];
 
     const err = (msg, pos = i) => { throw new RegexParseError(msg, pos); };
 
@@ -132,6 +136,7 @@
         if (!m) err('グループ名の書き方が正しくありません');
         kind = 'named';
         name = m[1];
+        groupNames.push(name);
         i += m[0].length;
       } else if (rest.startsWith('?')) {
         const m = /^\?([ims]*)(?:-([ims]+))?:/.exec(rest);
@@ -162,11 +167,13 @@
         i += m[0].length;
         return { type: 'backref', index: Number(m[0]), start, end: i };
       }
-      if (c === 'k') {
+      if (c === 'k' && (unicode || hasNamedGroups)) {
         const m = /^k<([^>]+)>/.exec(src.slice(i));
         if (m) {
           i += m[0].length;
-          return { type: 'backref', name: m[1], start, end: i };
+          const ref = { type: 'backref', name: m[1], start, end: i };
+          namedRefs.push(ref);
+          return ref;
         }
       }
       return parseCommonEscape(start);
@@ -249,6 +256,9 @@
 
     const ast = parseAlt();
     if (i < src.length) err('「)」に対応する「(」がありません');
+    for (const ref of namedRefs) {
+      if (!groupNames.includes(ref.name)) err(`「${ref.name}」という名前のグループがありません`, ref.start);
+    }
     return { ast, groupCount };
   }
 
