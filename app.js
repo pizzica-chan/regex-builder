@@ -319,31 +319,113 @@
   }
 
   const MAX_MATCHES = 1000;
+  // 一致の計算をこの時間で打ち切る。(a+)+$ のような正規表現は、文字列によって計算が終わらなくなる
+  const MATCH_TIMEOUT_MS = 1500;
 
-  function findMatches(re, text) {
+  // 一致の結果を、ワーカーから受け取る形（{ index, text, groups }）にそろえる
+  const pack = (m) => ({ index: m.index, text: m[0], groups: m.slice(1) });
+
+  // ワーカーが使えないとき（file:// で開いたときなど）は、画面と同じスレッドで調べる。この場合は打ち切れない
+  function findMatchesHere(re, text) {
     if (!re.global) {
       re.lastIndex = 0;
       const m = re.exec(text);
-      return m ? [m] : [];
+      return m ? [pack(m)] : [];
     }
     const out = [];
     for (const m of text.matchAll(re)) {
-      out.push(m);
+      out.push(pack(m));
       if (out.length >= MAX_MATCHES) break;
     }
     return out;
   }
 
-  function renderMatches(re) {
+  // ---------- ワーカーでの一致の計算 ----------
+
+  let worker = null;
+  let workerUsable = typeof Worker === 'function';
+  let job = null; // 計算中の仕事 { id, re, text, resolve, timer }
+  let jobSeq = 0;
+
+  function startWorker() {
+    if (!workerUsable) return null;
+    try {
+      const w = new Worker('match-worker.js');
+      w.onmessage = (e) => {
+        if (!job || e.data.id !== job.id) return;
+        finishJob(e.data.error ? { matches: [] } : { matches: e.data.matches });
+      };
+      // ワーカーのファイルを読めなかったときは、以後は画面と同じスレッドで調べる
+      w.onerror = (e) => {
+        e.preventDefault();
+        workerUsable = false;
+        stopWorker();
+        if (job) finishJob({ matches: findMatchesHere(job.re, job.text) });
+      };
+      return w;
+    } catch (_) {
+      workerUsable = false;
+      return null;
+    }
+  }
+
+  function stopWorker() {
+    if (worker) worker.terminate();
+    worker = null;
+  }
+
+  function finishJob(result) {
+    const { resolve, timer } = job;
+    clearTimeout(timer);
+    job = null;
+    resolve(result);
+  }
+
+  // 結果は { matches } か { timeout: true } か { stale: true }
+  function findMatches(re, text) {
+    // 前の計算がまだ終わっていなければ、ワーカーごと止めて捨てる
+    if (job) {
+      stopWorker();
+      finishJob({ stale: true });
+    }
+    if (!worker) worker = startWorker();
+    if (!worker) return Promise.resolve({ matches: findMatchesHere(re, text) });
+
+    return new Promise((resolve) => {
+      const id = ++jobSeq;
+      const timer = setTimeout(() => {
+        stopWorker();
+        finishJob({ timeout: true });
+      }, MATCH_TIMEOUT_MS);
+      job = { id, re, text, resolve, timer };
+      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES });
+    });
+  }
+
+  async function renderMatches(re) {
     const text = testEl.value;
     const hl = $('highlight');
     const table = $('match-table');
     const count = $('match-count');
-    table.innerHTML = '';
-    if (!re) { hl.textContent = text; count.textContent = ''; return; }
-    if (!text) { hl.innerHTML = ''; count.textContent = '試す文字列を入れてください。'; return; }
+    if ((!re || !text) && job) {
+      // 計算中の古い結果が、あとから表示を上書きしないようにする
+      stopWorker();
+      finishJob({ stale: true });
+    }
+    if (!re) { table.innerHTML = ''; hl.textContent = text; count.textContent = ''; return; }
+    if (!text) { table.innerHTML = ''; hl.innerHTML = ''; count.textContent = '試す文字列を入れてください。'; return; }
 
-    const matches = findMatches(re, text);
+    const result = await findMatches(re, text);
+    if (result.stale) return; // あとから入力された内容の結果を待つ
+    table.innerHTML = '';
+    if (result.timeout) {
+      hl.textContent = text;
+      count.textContent = `一致を調べるのに ${MATCH_TIMEOUT_MS / 1000} 秒以上かかったので、途中でやめました。` +
+        '(a+)+ のように繰り返しの中に繰り返しがある正規表現は、文字列によっては計算が終わらなくなります。';
+      return;
+    }
+
+    const { matches } = result;
     count.textContent = matches.length
       ? `${matches.length}${matches.length >= MAX_MATCHES ? '件以上' : '件'}の一致${re.global ? '' : '（g フラグがないので、最初の1件だけ）'}`
       : '一致しませんでした。';
@@ -352,11 +434,11 @@
     let pos = 0;
     matches.forEach((m, n) => {
       const start = m.index;
-      const end = start + m[0].length;
+      const end = start + m.text.length;
       if (start < pos) return;
       html += esc(text.slice(pos, start));
-      html += m[0].length
-        ? `<mark class="${n % 2 ? 'odd' : ''}" title="一致 ${n + 1}">${esc(m[0])}</mark>`
+      html += m.text.length
+        ? `<mark class="${n % 2 ? 'odd' : ''}" title="一致 ${n + 1}">${esc(m.text)}</mark>`
         : `<span class="empty-match" title="一致 ${n + 1}（長さ 0）"></span>`;
       pos = end;
     });
@@ -364,7 +446,7 @@
     hl.innerHTML = html;
 
     if (!matches.length) return;
-    const groupCount = matches[0].length - 1;
+    const groupCount = matches[0].groups.length;
     const nameOf = {};
     // 名前付きグループが何番かは一致の結果から分からないので、パターンを解析して調べる
     try {
@@ -381,11 +463,11 @@
 
     const shown = matches.slice(0, 200);
     let rows = shown.map((m, n) => {
-      const cells = [];
-      for (let g = 1; g <= groupCount; g++) {
-        cells.push(m[g] === undefined ? '<td><span class="none">（なし）</span></td>' : `<td><code>${esc(m[g])}</code></td>`);
-      }
-      return `<tr><td>${n + 1}</td><td>${m.index}</td><td><code>${esc(m[0])}</code></td>${cells.join('')}</tr>`;
+      // 一致しなかったグループは undefined。ワーカーからの受け渡しで null になる環境もあるので両方を見る
+      const cells = m.groups.map((g) => (g == null
+        ? '<td><span class="none">（なし）</span></td>'
+        : `<td><code>${esc(g)}</code></td>`));
+      return `<tr><td>${n + 1}</td><td>${m.index}</td><td><code>${esc(m.text)}</code></td>${cells.join('')}</tr>`;
     }).join('');
     const heads = [];
     for (let g = 1; g <= groupCount; g++) {
