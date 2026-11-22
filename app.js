@@ -79,6 +79,13 @@
     y: { label: '位置を固定して探す', desc: '前の一致の終わり（最初は文字列の先頭）の位置でだけ一致を調べ、その先は探しません。一致が途切れたところで止まるので、先頭から続く部分だけを取り出せます。「行ごとに判定する」の判定には使いません。', cmp: ['[A-Z]\\d', 'A1B2C3 D4', 'g', 'gy'] },
   };
 
+  // 「行ごとに判定する」の説明。lines: [例のパターン, 例の行]。行ごとに一致するかを並べて見せる
+  const LINE_TIP = {
+    label: '行ごとに判定する',
+    desc: '試す文字列の各行を別々の文字列として調べ、一致するかを行ごとに表に出します。それぞれの行で「一致するはず」か「一致しないはず」を選ぶと、期待どおりかを判定します。行ごとに調べるので、m フラグがなくても ^ と $ は各行の先頭と末尾に一致します。g と y のフラグは使いません。',
+    lines: ['^\\d{3}-\\d{4}$', ['123-4567', '1234567', '〒123-4567']],
+  };
+
   const PRESETS = [
     { name: '郵便番号（123-4567）', pattern: '^\\d{3}-\\d{4}$', flags: 'gm', test: '123-4567\n1234567\n12-34567\n100-0001' },
     { name: '携帯電話の番号', pattern: '^0[789]0-?\\d{4}-?\\d{4}$', flags: 'gm', test: '090-1234-5678\n08012345678\n03-1234-5678' },
@@ -185,6 +192,14 @@
       const [pattern, text, off, on] = item.cmp;
       html += exampleBlock('付けない', pattern, text, off, true);
       html += `<div class="tip-gap"></div>` + exampleBlock('付ける', pattern, text, on, true);
+    }
+    if (item.lines) {
+      const [pattern, lines] = item.lines;
+      html += `<div class="tip-ex"><span class="tip-ex-label">例</span><code>/${esc(pattern)}/</code></div>`;
+      html += '<div class="tip-sample tip-lines">' + lines.map((line) => {
+        const matches = exampleMatches(pattern, line, '');
+        return `<div><span>${exampleHtml(line, matches)}</span><span class="tip-count">${matches.length ? '一致する' : '一致しない'}</span></div>`;
+      }).join('') + '</div>';
     }
     return html;
   }
@@ -667,6 +682,7 @@
   }
 
   function setupLines() {
+    attachTip(lineModeEl.closest('label'), LINE_TIP, '', lineModeEl);
     lineModeEl.addEventListener('change', update);
     $('line-table').addEventListener('change', (e) => {
       const sel = e.target.closest('select[data-line]');

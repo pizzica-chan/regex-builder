@@ -612,3 +612,4 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
 .tip-sample mark.tip-next { margin-left: 2px; }
 .tip-count { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
 .tip-gap { height: 8px; }
+.tip-lines > div { display: flex; align-items: baseline; gap: 12px; }
