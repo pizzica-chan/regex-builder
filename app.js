@@ -996,7 +996,7 @@
           untestable = e.message;
           showError('');
         } else {
-          showError(`試す欄で動かす形に置き換えられませんでした。${e.message}`);
+          showError(`この正規表現は、試す欄では動かせませんでした。${e.message}`);
         }
       }
     }
@@ -1137,9 +1137,8 @@
     const d = Dialects.get(dialect);
     // 英字で終わる名前（「… の re」）のあとには空白を入れる
     const engine = /[A-Za-z0-9)]$/.test(d.engine) ? `${d.engine} ` : d.engine;
-    $('dialect-engine').textContent = isJs()
-      ? `${engine}の書き方と意味に合わせています。`
-      : `${engine}の書き方と意味に合わせています。「試す」の欄では、同じ意味の JavaScript の正規表現に置き換えて動かします。`;
+    // 試す欄で JavaScript に置き換えて動かすことは書かない。結果がずれる場面だけ、試す欄に注意を出す
+    $('dialect-engine').textContent = `${engine}の書き方と意味に合わせています。`;
     $('copy-literal').title = isJs() ? '/…/flags の形でコピー' : `${d.name}のコードの形でコピー`;
     buildPalette();
     buildPresets();

@@ -217,7 +217,7 @@
           if (js == null) throw new Untranslatable('参照しているグループが見つかりません');
           if (ctx.i && !useJsI) notes.add('大文字と小文字を区別しない後方参照は、試す欄では大文字と小文字を区別して比べています。');
           if (optionalGroups.has(n.index)) {
-            notes.add('一致しなかったグループを参照すると、この言語では失敗しますが、試す欄（JavaScript）では空文字列として一致します。');
+            notes.add('一致しなかったグループを参照すると、この言語では失敗しますが、試す欄では空文字列として一致したものとして扱います。');
           }
           return `(?:\\${js})`;
         }
