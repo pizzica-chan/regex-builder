@@ -24,6 +24,7 @@
 | `app.js` | 部品、説明の表示、一致の確認、共有 URL |
 | `layout.js` | 欄の配置の型と切り替え |
 | `match-worker.js` | 試す文字列との一致を、画面とは別の処理で調べる |
+| `favicon.svg`、`favicon.ico`、`apple-touch-icon.png` | ブラウザのタブやホーム画面に出るアイコン。`.ico` と `.png` は `python tools/make_favicons.py` で `favicon.svg` と同じ図形から作る（Pillow が要る） |
 
 ## 対応していないこと
 
