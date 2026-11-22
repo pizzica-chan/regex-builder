@@ -111,6 +111,26 @@
     }
   }
 
+  // 部品の欄をたたむ。たたんだかどうかはブラウザに保存する
+  const PALETTE_KEY = 'regex-builder:palette-collapsed';
+  function setupPaletteToggle() {
+    const btn = $('palette-toggle');
+    const body = $('palette-body');
+    const set = (collapsed) => {
+      body.hidden = collapsed;
+      btn.setAttribute('aria-expanded', String(!collapsed));
+      btn.textContent = collapsed ? 'ひらく' : 'たたむ';
+    };
+    let saved = null;
+    try { saved = localStorage.getItem(PALETTE_KEY); } catch (_) { /* 保存できない環境では開いた状態で始める */ }
+    set(saved === '1');
+    btn.addEventListener('click', () => {
+      const collapsed = !body.hidden;
+      set(collapsed);
+      try { localStorage.setItem(PALETTE_KEY, collapsed ? '1' : '0'); } catch (_) { /* 保存できなくても切り替えは続ける */ }
+    });
+  }
+
   // ---------- 部品の説明（マウスを乗せたときに出す） ----------
 
   const tipEl = document.createElement('div');
@@ -178,22 +198,30 @@
   window.addEventListener('scroll', () => { tipEl.hidden = true; }, { passive: true });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') tipEl.hidden = true; });
 
+  // ---------- 入力欄の書き換え ----------
+
   // execCommand を使うと、Ctrl+Z で元に戻せる
-  function replaceRange(start, end, text) {
-    patternEl.focus();
-    patternEl.setSelectionRange(start, end);
+  function replaceRange(el, start, end, text) {
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(start, end);
+    if (start === end && !text) return;
     const ok = document.execCommand && document.execCommand('insertText', false, text);
     if (!ok) {
-      const v = patternEl.value;
-      patternEl.value = v.slice(0, start) + text + v.slice(end);
+      const v = el.value;
+      el.value = v.slice(0, start) + text + v.slice(end);
     }
+  }
+
+  // 中身をまるごと置き換える。Ctrl+Z で前の中身に戻せる
+  function setValue(el, text) {
+    if (el.value !== text) replaceRange(el, 0, el.value.length, text);
   }
 
   // select を渡すと、入れた文字列のその範囲を選んだ状態にする（書き換えてほしい部分を示すため）
   function insertText(text, select) {
     const s = patternEl.selectionStart ?? patternEl.value.length;
     const e = patternEl.selectionEnd ?? s;
-    replaceRange(s, e, text);
+    replaceRange(patternEl, s, e, text);
     if (select) patternEl.setSelectionRange(s + select[0], s + select[1]);
     else patternEl.setSelectionRange(s + text.length, s + text.length);
     update();
@@ -203,7 +231,7 @@
     const s = patternEl.selectionStart ?? patternEl.value.length;
     const e = patternEl.selectionEnd ?? s;
     const selected = patternEl.value.slice(s, e);
-    replaceRange(s, e, open + selected + close);
+    replaceRange(patternEl, s, e, open + selected + close);
     if (selected) {
       const pos = s + open.length + selected.length + close.length;
       patternEl.setSelectionRange(pos, pos);
@@ -244,6 +272,66 @@
       }
       insertText(q);
     });
+    // 入力欄で Enter キーを押したら、data-submit のボタンを押したことにする。変換の確定の Enter は除く
+    for (const input of document.querySelectorAll('[data-submit]')) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+        e.preventDefault();
+        $(input.dataset.submit).click();
+      });
+    }
+  }
+
+  // ---------- 入力欄の高さ ----------
+
+  // 中身に合わせて textarea の高さを変える。textarea の中でスクロールしなくなるので、重ねた色付きの層と文字の位置がずれない
+  function autosize(el) {
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }
+
+  function watchWidth(el) {
+    let lastWidth = 0;
+    new ResizeObserver(() => {
+      if (el.clientWidth === lastWidth) return;
+      lastWidth = el.clientWidth;
+      autosize(el);
+    }).observe(el);
+  }
+
+  // ---------- 正規表現の入力欄の色分け ----------
+
+  const patternView = $('pattern-view');
+  const pv = { tokens: [], hover: null, errPos: null };
+
+  function renderPatternView() {
+    const src = patternEl.value;
+    const n = src.length;
+    const kind = new Array(n).fill('');
+    for (const [s, e, k] of pv.tokens) for (let i = s; i < e && i < n; i++) kind[i] = k;
+    const keyAt = (i) => {
+      const hl = pv.hover && i >= pv.hover[0] && i < pv.hover[1] ? ' hl' : '';
+      const err = i === pv.errPos ? ' err' : '';
+      return (kind[i] ? `tok-${kind[i]}` : '') + hl + err;
+    };
+    let html = '';
+    let i = 0;
+    while (i < n) {
+      const key = keyAt(i);
+      let j = i + 1;
+      while (j < n && keyAt(j) === key) j++;
+      const text = esc(src.slice(i, j));
+      html += key ? `<span class="${key.trim()}">${text}</span>` : text;
+      i = j;
+    }
+    // 誤りの場所が末尾（閉じ括弧が足りないなど）のときは、末尾に印を出す
+    if (pv.errPos != null && pv.errPos >= n) html += '<span class="err-end"></span>';
+    patternView.innerHTML = html;
+  }
+
+  function setPatternHover(range) {
+    pv.hover = range;
+    renderPatternView();
   }
 
   // ---------- 表示の更新 ----------
@@ -258,13 +346,17 @@
     el.textContent = msg || '';
   }
 
-  function renderMirror(src, hl) {
-    const el = $('mirror');
-    if (!src) { el.innerHTML = '<span class="hint">（まだ何もありません）</span>'; return; }
-    if (!hl) { el.textContent = src; return; }
-    el.innerHTML = esc(src.slice(0, hl[0])) +
-      `<mark>${esc(src.slice(hl[0], hl[1]))}</mark>` +
-      esc(src.slice(hl[1]));
+  // 説明の項目と、入力欄の範囲の対応。入力欄のカーソルの位置から項目を探すのに使う
+  let rowRanges = [];
+
+  function hoverable(el, start, end) {
+    el.tabIndex = 0;
+    const on = () => setPatternHover([start, end]);
+    const off = () => setPatternHover(null);
+    el.addEventListener('mouseenter', on);
+    el.addEventListener('focus', on);
+    el.addEventListener('mouseleave', off);
+    el.addEventListener('blur', off);
   }
 
   function renderTree(nodes, src, listType) {
@@ -277,13 +369,8 @@
       const frag = n.end > n.start ? src.slice(n.start, n.end) : '';
       row.innerHTML = `<span>${n.html}</span>${frag ? `<code class="src" title="${esc(frag)}">${esc(frag)}</code>` : ''}`;
       if (frag) {
-        row.tabIndex = 0;
-        const on = () => renderMirror(src, [n.start, n.end]);
-        const off = () => renderMirror(src, null);
-        row.addEventListener('mouseenter', on);
-        row.addEventListener('focus', on);
-        row.addEventListener('mouseleave', off);
-        row.addEventListener('blur', off);
+        hoverable(row, n.start, n.end);
+        rowRanges.push({ row, start: n.start, end: n.end });
       }
       li.append(row);
       if (n.children && n.children.length) li.append(renderTree(n.children, src, n.listType));
@@ -292,63 +379,85 @@
     return list;
   }
 
+  function renderSummary(el, { scope, listType, steps }) {
+    el.innerHTML = `<p class="scope">${scope}</p>`;
+    if (!steps.length) return;
+    const list = document.createElement(listType === 'alt' ? 'ul' : 'ol');
+    list.className = `steps${listType === 'alt' ? ' alt' : ''}${steps.length === 1 ? ' single' : ''}`;
+    for (const s of steps) {
+      const li = document.createElement('li');
+      li.innerHTML = s.html;
+      if (s.end > s.start) hoverable(li, s.start, s.end);
+      list.append(li);
+    }
+    el.append(list);
+  }
+
   function renderMeaning(src, flags) {
     const tree = $('tree');
     const summary = $('summary');
     const flagEl = $('flag-explain');
     tree.innerHTML = '';
     flagEl.innerHTML = '';
-    renderMirror(src, null);
+    rowRanges = [];
     if (!src) {
-      summary.textContent = '正規表現を入力すると、ここに意味が出ます。';
+      summary.innerHTML = '<p class="scope">正規表現を入力すると、ここに意味が出ます。</p>';
       return;
     }
     let result;
     try {
       result = explain(src, flags);
     } catch (e) {
-      summary.textContent = e instanceof RegexParseError
+      const msg = e instanceof RegexParseError
         ? `説明を作れませんでした（${e.message}、${e.pos + 1}文字目）。`
         : '説明を作れませんでした。';
+      summary.innerHTML = `<p class="scope">${esc(msg)}</p>`;
       return;
     }
-    const { scope, chain } = result.summary;
-    summary.innerHTML = `<span class="scope">${scope}</span>${chain ? `<span class="chain">${chain}</span>` : ''}`;
+    renderSummary(summary, result.summary);
     tree.append(renderTree(result.tree, src, 'steps'));
     if (result.flags.length) {
       flagEl.innerHTML = '<h3>フラグ</h3><ul>' +
         result.flags.map((f) => `<li><code>${f.flag}</code>：${esc(f.text)}</li>`).join('') +
         '</ul>';
     }
+    markCurrentRow();
   }
 
+  // 入力欄のカーソルの位置にある部品の項目に、印を付ける。範囲がいちばん狭い項目を選ぶ
+  function markCurrentRow() {
+    let best = null;
+    if (document.activeElement === patternEl && patternEl.selectionStart === patternEl.selectionEnd) {
+      const pos = patternEl.selectionStart;
+      // カーソルが部品の中にあればその部品、なければ直前で終わる部品（いま書き終えた部品）
+      const inside = rowRanges.filter((r) => r.start <= pos && pos < r.end);
+      const candidates = inside.length ? inside : rowRanges.filter((r) => r.end === pos);
+      for (const r of candidates) {
+        if (!best || r.end - r.start <= best.end - best.start) best = r;
+      }
+    }
+    for (const r of rowRanges) r.row.classList.toggle('current', r === best);
+  }
+
+  // ---------- 一致の計算 ----------
+
   const MAX_MATCHES = 1000;
+  const MAX_LINES = 500;
   // 一致の計算をこの時間で打ち切る。(a+)+$ のような正規表現は、文字列によって計算が終わらなくなる
   const MATCH_TIMEOUT_MS = 1500;
 
-  // 一致の結果を、ワーカーから受け取る形（{ index, text, groups }）にそろえる
-  const pack = (m) => ({ index: m.index, text: m[0], groups: m.slice(1) });
-
   // ワーカーが使えないとき（file:// で開いたときなど）は、画面と同じスレッドで調べる。この場合は打ち切れない
-  function findMatchesHere(re, text) {
-    if (!re.global) {
-      re.lastIndex = 0;
-      const m = re.exec(text);
-      return m ? [pack(m)] : [];
+  function findMatchesHere(re, text, lines) {
+    try {
+      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines);
+    } catch (_) {
+      return { matches: [], lineHits: null };
     }
-    const out = [];
-    for (const m of text.matchAll(re)) {
-      out.push(pack(m));
-      if (out.length >= MAX_MATCHES) break;
-    }
-    return out;
   }
-
-  // ---------- ワーカーでの一致の計算 ----------
 
   let worker = null;
   let workerUsable = typeof Worker === 'function';
-  let job = null; // 計算中の仕事 { id, re, text, resolve, timer }
+  let job = null; // 計算中の仕事 { id, re, text, lines, resolve, timer }
   let jobSeq = 0;
 
   function startWorker() {
@@ -357,14 +466,14 @@
       const w = new Worker('match-worker.js');
       w.onmessage = (e) => {
         if (!job || e.data.id !== job.id) return;
-        finishJob(e.data.error ? { matches: [] } : { matches: e.data.matches });
+        finishJob(e.data.error ? { matches: [], lineHits: null } : e.data);
       };
       // ワーカーのファイルを読めなかったときは、以後は画面と同じスレッドで調べる
       w.onerror = (e) => {
         e.preventDefault();
         workerUsable = false;
         stopWorker();
-        if (job) finishJob({ matches: findMatchesHere(job.re, job.text) });
+        if (job) finishJob(findMatchesHere(job.re, job.text, job.lines));
       };
       return w;
     } catch (_) {
@@ -385,15 +494,18 @@
     resolve(result);
   }
 
-  // 結果は { matches } か { timeout: true } か { stale: true }
-  function findMatches(re, text) {
+  function cancelJob() {
+    if (!job) return;
+    stopWorker();
+    finishJob({ stale: true });
+  }
+
+  // 結果は { matches, lineHits } か { timeout: true } か { stale: true }
+  function findMatches(re, text, lines) {
     // 前の計算がまだ終わっていなければ、ワーカーごと止めて捨てる
-    if (job) {
-      stopWorker();
-      finishJob({ stale: true });
-    }
+    cancelJob();
     if (!worker) worker = startWorker();
-    if (!worker) return Promise.resolve({ matches: findMatchesHere(re, text) });
+    if (!worker) return Promise.resolve(findMatchesHere(re, text, lines));
 
     return new Promise((resolve) => {
       const id = ++jobSeq;
@@ -401,60 +513,170 @@
         stopWorker();
         finishJob({ timeout: true });
       }, MATCH_TIMEOUT_MS);
-      job = { id, re, text, resolve, timer };
-      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES });
+      job = { id, re, text, lines, resolve, timer };
+      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines });
     });
   }
 
-  async function renderMatches(re) {
+  // ---------- 試す文字列の色分け ----------
+
+  const testView = $('test-view');
+  const GROUP_COLORS = 6;
+  // 最後に表示した一致。表の行にマウスを乗せたときに、色分けを描き直すのに使う
+  const tv = { matches: [], focus: -1 };
+
+  function renderTestView() {
     const text = testEl.value;
-    const hl = $('highlight');
-    const table = $('match-table');
-    const count = $('match-count');
-    if ((!re || !text) && job) {
-      // 計算中の古い結果が、あとから表示を上書きしないようにする
-      stopWorker();
-      finishJob({ stale: true });
-    }
-    if (!re) { table.innerHTML = ''; hl.textContent = text; count.textContent = ''; return; }
-    if (!text) { table.innerHTML = ''; hl.innerHTML = ''; count.textContent = '試す文字列を入れてください。'; return; }
-
-    const result = await findMatches(re, text);
-    if (result.stale) return; // あとから入力された内容の結果を待つ
-    table.innerHTML = '';
-    if (result.timeout) {
-      hl.textContent = text;
-      count.textContent = `一致を調べるのに ${MATCH_TIMEOUT_MS / 1000} 秒以上かかったので、途中でやめました。` +
-        '(a+)+ のように繰り返しの中に繰り返しがある正規表現は、文字列によっては計算が終わらなくなります。';
-      return;
-    }
-
-    const { matches } = result;
-    count.textContent = matches.length
-      ? `${matches.length}${matches.length >= MAX_MATCHES ? '件以上' : '件'}の一致${re.global ? '' : '（g フラグがないので、最初の1件だけ）'}`
-      : '一致しませんでした。';
-
-    let html = '';
-    let pos = 0;
-    matches.forEach((m, n) => {
-      const start = m.index;
-      const end = start + m.text.length;
-      if (start < pos) return;
-      html += esc(text.slice(pos, start));
-      html += m.text.length
-        ? `<mark class="${n % 2 ? 'odd' : ''}" title="一致 ${n + 1}">${esc(m.text)}</mark>`
-        : `<span class="empty-match" title="一致 ${n + 1}（長さ 0）"></span>`;
-      pos = end;
+    const n = text.length;
+    const matchAt = new Int32Array(n).fill(-1);
+    const groupAt = new Int32Array(n);
+    const empties = new Map(); // 長さ 0 の一致の位置 → 一致の番号
+    tv.matches.forEach((m, k) => {
+      const end = m.index + m.text.length;
+      if (end === m.index) { if (!empties.has(m.index)) empties.set(m.index, k); return; }
+      for (let i = m.index; i < end; i++) matchAt[i] = k;
+      // 番号の大きいグループほど内側にあるので、あとから上書きすると内側の色が残る
+      (m.ranges || []).forEach((r, g) => {
+        if (!r) return;
+        for (let i = r[0]; i < r[1] && i < n; i++) groupAt[i] = g + 1;
+      });
     });
-    html += esc(text.slice(pos));
-    hl.innerHTML = html;
+    const keyAt = (i) => {
+      const k = matchAt[i];
+      let cls = '';
+      if (k >= 0) cls += ` m m${k % 2}${k === tv.focus ? ' m-focus' : ''}`;
+      if (groupAt[i]) cls += ` g g${(groupAt[i] - 1) % GROUP_COLORS}`;
+      return cls.trim();
+    };
+    const emptyMark = (k) => `<span class="empty-match${k === tv.focus ? ' m-focus' : ''}"></span>`;
+    let html = '';
+    let i = 0;
+    while (i < n) {
+      if (empties.has(i)) html += emptyMark(empties.get(i));
+      const key = keyAt(i);
+      let j = i + 1;
+      while (j < n && !empties.has(j) && keyAt(j) === key) j++;
+      const part = esc(text.slice(i, j));
+      html += key ? `<span class="${key}">${part}</span>` : part;
+      i = j;
+    }
+    if (empties.has(n)) html += emptyMark(empties.get(n));
+    testView.innerHTML = html;
+  }
 
-    if (!matches.length) return;
-    const groupCount = matches[0].groups.length;
+  function focusMatch(k) {
+    tv.focus = k;
+    renderTestView();
+  }
+
+  // ---------- 行ごとの判定 ----------
+
+  const lineModeEl = $('line-mode');
+  // 行の中身 → 期待（'+' は一致するはず、'-' は一致しないはず）。行を書き換えても、同じ中身の行には期待が残る
+  const expectations = new Map();
+  let lastLineHits = null;
+
+  const testLines = () => testEl.value.split('\n').map((l) => l.replace(/\r$/, '')).slice(0, MAX_LINES);
+
+  function judge(hit, expect) {
+    if (!expect) return '';
+    return (expect === '+') === hit ? 'ok' : 'ng';
+  }
+
+  // 期待どおりの行の数と、期待を選んだ行の数
+  function lineScore() {
+    if (!lastLineHits) return null;
+    const lines = testLines();
+    let ok = 0;
+    let total = 0;
+    lines.forEach((line, k) => {
+      const result = judge(lastLineHits[k], expectations.get(line));
+      if (!result) return;
+      total++;
+      if (result === 'ok') ok++;
+    });
+    return { ok, total };
+  }
+
+  function renderLines() {
+    const panel = $('line-panel');
+    const table = $('line-table');
+    const summary = $('line-summary');
+    panel.hidden = !lineModeEl.checked;
+    if (!lineModeEl.checked) return;
+    if (!lastLineHits) { table.innerHTML = ''; summary.textContent = ''; return; }
+    const lines = testLines();
+    let hits = 0;
+    let shown = 0;
+    let rows = '';
+    lines.forEach((line, k) => {
+      if (line === '') return;
+      shown++;
+      const hit = lastLineHits[k];
+      if (hit) hits++;
+      const expect = expectations.get(line) || '';
+      const result = judge(hit, expect);
+      const opt = (v, label) => `<option value="${v}"${expect === v ? ' selected' : ''}>${label}</option>`;
+      rows += `<tr class="${result}"><td>${k + 1}</td><td><code>${esc(line)}</code></td>` +
+        `<td>${hit ? '一致する' : '<span class="none">一致しない</span>'}</td>` +
+        `<td><select data-line="${k}" aria-label="${k + 1}行目の期待">${opt('', '指定なし')}${opt('+', '一致するはず')}${opt('-', '一致しないはず')}</select></td>` +
+        `<td class="verdict">${result === 'ok' ? '期待どおり' : result === 'ng' ? '期待と違う' : ''}</td></tr>`;
+    });
+    if (!shown) { table.innerHTML = ''; summary.textContent = '空でない行がありません。'; return; }
+    const score = lineScore();
+    let text = `${shown}行のうち、一致する行は ${hits}行です。`;
+    if (score.total) text += `期待を選んだ ${score.total}行のうち、${score.ok}行が期待どおりです。`;
+    const total = testEl.value.split('\n').length;
+    if (total > MAX_LINES) text += `（${MAX_LINES}行目までを調べています）`;
+    summary.textContent = text;
+    summary.className = `line-summary${score.total ? (score.ok === score.total ? ' ok' : ' ng') : ''}`;
+    table.innerHTML = '<div class="table-wrap"><table><thead><tr><th>行</th><th>中身</th><th>結果</th><th>期待</th><th>判定</th></tr></thead>' +
+      `<tbody>${rows}</tbody></table></div>`;
+  }
+
+  function setupLines() {
+    lineModeEl.addEventListener('change', update);
+    $('line-table').addEventListener('change', (e) => {
+      const sel = e.target.closest('select[data-line]');
+      if (!sel) return;
+      const line = testLines()[Number(sel.dataset.line)];
+      if (sel.value) expectations.set(line, sel.value);
+      else expectations.delete(line);
+      renderLines();
+      renderBadge();
+      saveToHash(patternEl.value, currentFlags());
+    });
+  }
+
+  // ---------- 一致の表示 ----------
+
+  // 正規表現の欄の見出しの横に出す、結果の短い表示。下の欄まで見に行かなくても結果が分かるようにする
+  const badge = { state: 'none', count: 0 };
+
+  function renderBadge() {
+    const el = $('match-badge');
+    let text = '';
+    let cls = '';
+    if (badge.state === 'error') { text = '書き方に誤りがあります'; cls = 'ng'; }
+    else if (badge.state === 'timeout') { text = '時間がかかるので打ち切りました'; cls = 'ng'; }
+    else if (badge.state === 'done') {
+      text = badge.count ? `${badge.count}${badge.count >= MAX_MATCHES ? '件以上' : '件'}の一致` : '一致なし';
+      const score = lineModeEl.checked ? lineScore() : null;
+      if (score && score.total) {
+        text += `・期待どおり ${score.ok}/${score.total}行`;
+        cls = score.ok === score.total ? 'ok' : 'ng';
+      }
+    }
+    el.hidden = !text;
+    el.textContent = text;
+    el.className = `badge${cls ? ` ${cls}` : ''}`;
+  }
+
+  function groupNames() {
     const nameOf = {};
     // 名前付きグループが何番かは一致の結果から分からないので、パターンを解析して調べる
     try {
-      const { ast } = window.RegexExplain.parse(re.source, re.flags);
+      const { ast } = window.RegexExplain.parse(patternEl.value, currentFlags());
       (function walk(n) {
         if (!n || typeof n !== 'object') return;
         if (n.type === 'group' && n.kind === 'named') nameOf[n.index] = n.name;
@@ -464,33 +686,133 @@
         }
       })(ast);
     } catch (_) { /* 名前が出せなくても表は作る */ }
+    return nameOf;
+  }
 
+  function renderMatchTable(matches) {
+    const table = $('match-table');
+    if (!matches.length) { table.innerHTML = ''; return; }
+    const groupCount = matches[0].groups.length;
+    const nameOf = groupNames();
     const shown = matches.slice(0, 200);
     let rows = shown.map((m, n) => {
       // 一致しなかったグループは undefined。ワーカーからの受け渡しで null になる環境もあるので両方を見る
       const cells = m.groups.map((g) => (g == null
         ? '<td><span class="none">（なし）</span></td>'
         : `<td><code>${esc(g)}</code></td>`));
-      return `<tr><td>${n + 1}</td><td>${m.index}</td><td><code>${esc(m.text)}</code></td>${cells.join('')}</tr>`;
+      return `<tr data-match="${n}" tabindex="0" title="押すと、試す文字列のこの部分を選びます"><td>${n + 1}</td><td>${m.index}</td><td><code>${esc(m.text)}</code></td>${cells.join('')}</tr>`;
     }).join('');
     const heads = [];
     for (let g = 1; g <= groupCount; g++) {
-      heads.push(`<th>グループ ${g}${nameOf[g] ? `「${esc(nameOf[g])}」` : ''}</th>`);
+      const swatch = `<span class="swatch g${(g - 1) % GROUP_COLORS}" aria-hidden="true"></span>`;
+      heads.push(`<th>${swatch}グループ ${g}${nameOf[g] ? `「${esc(nameOf[g])}」` : ''}</th>`);
     }
     if (matches.length > shown.length) {
       rows += `<tr><td colspan="${3 + groupCount}" class="none">ほか ${matches.length - shown.length}件は省略</td></tr>`;
     }
-    table.innerHTML = `<div class="table-wrap"><table><thead><tr><th>#</th><th>位置</th><th>一致した文字列</th>${heads.join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    table.innerHTML = `<div class="table-wrap"><table class="matches"><thead><tr><th>#</th><th>位置</th><th>一致した文字列</th>${heads.join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
-  // 自前の解析で誤りの場所が分かれば、日本語の説明を返す。分からなければ null（ブラウザの英語の説明を使う）
+  // 一致の表の行と、試す文字列の色分けを結び付ける
+  function setupMatchTable() {
+    const table = $('match-table');
+    const rowOf = (e) => e.target.closest && e.target.closest('tr[data-match]');
+    table.addEventListener('mouseover', (e) => {
+      const tr = rowOf(e);
+      if (tr) focusMatch(Number(tr.dataset.match));
+    });
+    table.addEventListener('mouseleave', () => focusMatch(-1));
+    table.addEventListener('focusin', (e) => {
+      const tr = rowOf(e);
+      if (tr) focusMatch(Number(tr.dataset.match));
+    });
+    table.addEventListener('focusout', () => focusMatch(-1));
+    const select = (tr) => {
+      const m = tv.matches[Number(tr.dataset.match)];
+      if (!m) return;
+      testEl.focus({ preventScroll: true });
+      testEl.setSelectionRange(m.index, m.index + m.text.length);
+    };
+    table.addEventListener('click', (e) => { const tr = rowOf(e); if (tr) select(tr); });
+    table.addEventListener('keydown', (e) => {
+      const tr = rowOf(e);
+      if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(tr); }
+    });
+  }
+
+  function clearMatches(countText) {
+    tv.matches = [];
+    tv.focus = -1;
+    renderTestView();
+    $('match-table').innerHTML = '';
+    $('match-count').textContent = countText;
+    lastLineHits = null;
+    renderLines();
+  }
+
+  async function renderMatches(re) {
+    const text = testEl.value;
+    if (!re || !text) cancelJob(); // 計算中の古い結果が、あとから表示を上書きしないようにする
+    if (!re) {
+      badge.state = patternEl.value ? 'error' : 'none';
+      clearMatches('');
+      renderBadge();
+      return;
+    }
+    if (!text) {
+      badge.state = 'none';
+      clearMatches('試す文字列を入れてください。');
+      renderBadge();
+      return;
+    }
+
+    const lines = lineModeEl.checked ? testLines() : undefined;
+    const result = await findMatches(re, text, lines);
+    if (result.stale) return; // あとから入力された内容の結果を待つ
+    if (result.timeout) {
+      badge.state = 'timeout';
+      clearMatches(`一致を調べるのに ${MATCH_TIMEOUT_MS / 1000} 秒以上かかったので、途中でやめました。` +
+        '(a+)+ のように繰り返しの中に繰り返しがある正規表現は、文字列によっては計算が終わらなくなります。');
+      renderBadge();
+      return;
+    }
+
+    const { matches } = result;
+    tv.matches = matches;
+    tv.focus = -1;
+    renderTestView();
+    $('match-count').textContent = matches.length
+      ? `${matches.length}${matches.length >= MAX_MATCHES ? '件以上' : '件'}の一致${re.global ? '' : '（g フラグがないので、最初の1件だけ）'}。表の行にマウスを乗せると、上の文字列の対応する一致に枠が付きます。`
+      : '一致しませんでした。';
+    renderMatchTable(matches);
+    lastLineHits = result.lineHits || null;
+    renderLines();
+    badge.state = 'done';
+    badge.count = matches.length;
+    renderBadge();
+  }
+
+  // ---------- 全体の更新 ----------
+
+  // 自前の解析で誤りの場所が分かれば、日本語の説明と位置を返す。分からなければ null（ブラウザの英語の説明を使う）
   function japaneseError(src, flags) {
     try {
       window.RegexExplain.parse(src, flags);
     } catch (e) {
-      if (e instanceof RegexParseError) return `${e.message}（${e.pos + 1}文字目）`;
+      if (e instanceof RegexParseError) return { message: `${e.message}（${e.pos + 1}文字目）`, pos: e.pos };
     }
     return null;
+  }
+
+  // 入力欄の色分けの範囲。書きかけで ) や ] が足りないときは、補って解析し、色分けを消さないようにする
+  function patternTokens(src, flags) {
+    const { parse, tokens } = window.RegexExplain;
+    for (const tail of ['', ')', '))', ')))', ']', '])', ']))']) {
+      try {
+        return tokens(parse(src + tail, flags).ast).filter(([s]) => s < src.length);
+      } catch (_) { /* 次の補い方を試す */ }
+    }
+    return [];
   }
 
   let lastRe = null;
@@ -501,16 +823,25 @@
     $('flag-view').textContent = flags;
 
     lastRe = null;
+    pv.errPos = null;
     if (src) {
       try {
         lastRe = new RegExp(src, flags);
         showError('');
       } catch (e) {
-        showError(`正規表現の書き方に誤りがあります。${japaneseError(src, flags) || e.message}`);
+        const ja = japaneseError(src, flags);
+        if (ja) pv.errPos = ja.pos;
+        showError(`正規表現の書き方に誤りがあります。${ja ? ja.message : e.message}`);
       }
     } else {
       showError('');
     }
+
+    pv.tokens = patternTokens(src, flags);
+    pv.hover = null;
+    renderPatternView();
+    autosize(patternEl);
+    autosize(testEl);
 
     // 書き方に誤りがあっても、解析できれば説明を出す
     renderMeaning(src, flags);
@@ -520,6 +851,8 @@
 
   // ---------- 共有 URL ----------
 
+  const MAX_SHARED_TEXT = 2000;
+
   let hashTimer = null;
   function saveToHash(src, flags) {
     clearTimeout(hashTimer);
@@ -527,7 +860,14 @@
       const p = new URLSearchParams();
       if (src) p.set('p', src);
       if (flags) p.set('f', flags);
-      if (testEl.value && testEl.value.length <= 2000) p.set('t', testEl.value);
+      const text = testEl.value;
+      if (text && text.length <= MAX_SHARED_TEXT) {
+        p.set('t', text);
+        // 期待は、行ごとに + - . の 1 文字で表す
+        const marks = testLines().map((line) => expectations.get(line) || '.').join('').replace(/\.+$/, '');
+        if (marks) p.set('e', marks);
+      }
+      if (lineModeEl.checked) p.set('l', '1');
       const hash = p.toString();
       history.replaceState(null, '', hash ? `#${hash}` : location.pathname + location.search);
     }, 300);
@@ -540,6 +880,11 @@
     patternEl.value = p.get('p') || '';
     setFlags(p.get('f') ?? '');
     testEl.value = p.get('t') || '';
+    lineModeEl.checked = p.get('l') === '1';
+    const marks = p.get('e') || '';
+    testLines().forEach((line, k) => {
+      if (marks[k] === '+' || marks[k] === '-') expectations.set(line, marks[k]);
+    });
     return true;
   }
 
@@ -547,12 +892,32 @@
     for (const b of flagBoxes) b.checked = flags.includes(b.value);
   }
 
-  function toast(msg) {
+  // ---------- 知らせ ----------
+
+  let toastTimer = null;
+
+  // undo を渡すと「元に戻す」ボタンを付け、少し長めに出す
+  function toast(msg, undo) {
+    const area = $('toast-area');
+    clearTimeout(toastTimer);
+    area.innerHTML = '';
     const t = document.createElement('div');
     t.className = 'toast';
-    t.textContent = msg;
-    document.body.append(t);
-    setTimeout(() => t.remove(), 1600);
+    const text = document.createElement('span');
+    text.textContent = msg;
+    t.append(text);
+    if (undo) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = '元に戻す';
+      b.addEventListener('click', () => {
+        t.remove();
+        undo();
+      });
+      t.append(b);
+    }
+    area.append(t);
+    toastTimer = setTimeout(() => t.remove(), undo ? 6000 : 1800);
   }
 
   async function copy(text, msg) {
@@ -562,6 +927,19 @@
     } catch (_) {
       window.prompt('コピーしてください', text);
     }
+  }
+
+  // 正規表現・フラグ・試す文字列をまとめて覚えておき、あとで戻す
+  function snapshot() {
+    return { pattern: patternEl.value, flags: currentFlags(), test: testEl.value, lineMode: lineModeEl.checked };
+  }
+
+  function restore(s) {
+    setValue(testEl, s.test);
+    setValue(patternEl, s.pattern);
+    setFlags(s.flags);
+    lineModeEl.checked = s.lineMode;
+    update();
   }
 
   function setupTools() {
@@ -574,12 +952,14 @@
     });
     sel.addEventListener('change', () => {
       const p = PRESETS[Number(sel.value)];
-      if (!p) return;
-      patternEl.value = p.pattern;
-      setFlags(p.flags);
-      testEl.value = p.test;
       sel.value = '';
+      if (!p) return;
+      const before = snapshot();
+      setValue(testEl, p.test);
+      setValue(patternEl, p.pattern);
+      setFlags(p.flags);
       update();
+      toast(`例「${p.name}」を読み込みました`, () => restore(before));
     });
     $('copy-literal').addEventListener('click', () => {
       if (!lastRe) { toast('正しい正規表現がありません'); return; }
@@ -587,21 +967,48 @@
     });
     $('copy-link').addEventListener('click', () => {
       saveToHash(patternEl.value, currentFlags());
-      const note = testEl.value.length > 2000 ? '（試す文字列は 2000 文字を超えるので、含めていません）' : '';
+      const note = testEl.value.length > MAX_SHARED_TEXT ? `（試す文字列は ${MAX_SHARED_TEXT} 文字を超えるので、含めていません）` : '';
       setTimeout(() => copy(location.href, `共有 URL をコピーしました${note}`), 350);
     });
     $('clear').addEventListener('click', () => {
-      patternEl.value = '';
+      if (!patternEl.value) return;
+      const before = snapshot();
+      setValue(patternEl, '');
       update();
-      patternEl.focus();
+      toast('正規表現を消しました', () => restore(before));
     });
-    patternEl.addEventListener('input', update);
+
+    // 正規表現は 1 行で書く。Enter キーでは改行せず、貼り付けた改行は \n に置き換える
+    patternEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) e.preventDefault();
+    });
+    patternEl.addEventListener('input', () => {
+      if (/[\r\n]/.test(patternEl.value)) {
+        const pos = patternEl.selectionStart;
+        const fix = (s) => s.replace(/\r\n|\r|\n/g, '\\n');
+        const head = fix(patternEl.value.slice(0, pos));
+        patternEl.value = head + fix(patternEl.value.slice(pos));
+        patternEl.setSelectionRange(head.length, head.length);
+      }
+      update();
+    });
     testEl.addEventListener('input', update);
     flagBoxes.forEach((b) => b.addEventListener('change', update));
+
+    // 入力欄のカーソルが動いたら、説明の項目の印を付け直す
+    document.addEventListener('selectionchange', () => {
+      if (document.activeElement === patternEl) markCurrentRow();
+    });
+    patternEl.addEventListener('blur', markCurrentRow);
+    watchWidth(patternEl);
+    watchWidth(testEl);
   }
 
   buildPalette();
+  setupPaletteToggle();
   setupCustomParts();
+  setupLines();
+  setupMatchTable();
   setupTools();
   if (!loadFromHash()) {
     const p = PRESETS[3];

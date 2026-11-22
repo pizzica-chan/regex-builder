@@ -4,25 +4,13 @@
  */
 'use strict';
 
-function pack(m) {
-  return { index: m.index, text: m[0], groups: m.slice(1) };
-}
+importScripts('match-core.js');
 
 self.onmessage = (e) => {
-  const { id, source, flags, text, max } = e.data;
+  const { id, source, flags, text, max, lines } = e.data;
   try {
-    const re = new RegExp(source, flags);
-    const matches = [];
-    if (re.global) {
-      for (const m of text.matchAll(re)) {
-        matches.push(pack(m));
-        if (matches.length >= max) break;
-      }
-    } else {
-      const m = re.exec(text);
-      if (m) matches.push(pack(m));
-    }
-    self.postMessage({ id, matches });
+    const { matches, lineHits } = self.MatchCore.findAll(source, flags, text, max, lines);
+    self.postMessage({ id, matches, lineHits });
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message) });
   }

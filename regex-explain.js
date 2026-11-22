@@ -81,9 +81,11 @@
       for (const it of items) {
         const prev = out[out.length - 1];
         if (it.type === 'char' && prev && (prev.type === 'char' || prev.type === 'literal')) {
+          // parts は、まとめる前の 1 文字ずつの範囲（入力欄の色分けで、エスケープを見分けるのに使う）
           out[out.length - 1] = {
             type: 'literal',
             value: prev.value + it.value,
+            parts: [...(prev.parts || [{ start: prev.start, end: prev.end }]), { start: it.start, end: it.end }],
             start: prev.start,
             end: it.end,
           };
@@ -629,8 +631,13 @@
   const ARROW = '<span class="x-arrow">→</span>';
   const OR = '<span class="x-or">または</span>';
 
+  // 2 つ以上の部品が並ぶ候補を含む「または」は、要約では中身を書かずに数だけ言う。中身は「くわしく」で見る
+  const isComplexAlt = (alt) => alt.alts.some((a) => a.type === 'seq' && a.items.length > 1);
+  const altCount = (alt) => `${alt.alts.length}通りの並びのどれか`;
+
   // 「または」で並べる。2 つ以上の部品が並ぶ候補は（ ）で囲み、どこまでが 1 つの候補かを示す
   function altChain(alt, ctx) {
+    if (isComplexAlt(alt)) return altCount(alt);
     return alt.alts.map((a) => {
       const text = short(a, ctx);
       return a.type === 'seq' && a.items.length > 1 ? `（${text}）` : text;
@@ -691,13 +698,16 @@
     }
   }
 
-  // 先頭と末尾の ^ $ を「どこに一致するか」の文に移し、残りを矢印でつなぐ
+  // 先頭と末尾の ^ $ を「どこに一致するか」の文に移し、残りを 1 つずつの手順（steps）にする。
+  // 各手順は { html, start, end }。listType が 'alt' なら「または」で並ぶ候補、'steps' なら順に並ぶ部品
   function summarize(ast, ctx) {
     const unit = ctx.flags.includes('m') ? '行' : '文字列';
+    const step = (n, html) => ({ html, start: n.start, end: n.end });
     if (ast.type !== 'seq') {
       return {
         scope: `${unit}の中から、次のどれかに一致する部分を探します。`,
-        chain: altChain(ast, ctx),
+        listType: 'alt',
+        steps: ast.alts.map((a) => step(a, a.type === 'seq' && !a.items.length ? '何もない' : short(a, ctx))),
       };
     }
     let items = ast.items;
@@ -706,7 +716,8 @@
     if (head) items = items.slice(1);
     const tail = isAnchor(items[items.length - 1], 'end');
     if (tail) items = items.slice(0, -1);
-    const chain = items.map((n) => short(n, ctx)).join(` ${ARROW} `);
+    // 文字だけの手順は、1 行で見ても文字だと分かるよう「という文字」を付ける
+    const steps = items.map((n) => step(n, short(n, ctx) + (n.type === 'char' || n.type === 'literal' ? ' という文字' : '')));
 
     let scope;
     if (!items.length) {
@@ -723,7 +734,7 @@
     } else {
       scope = `${unit}の中から、次の並びに一致する部分を探します。`;
     }
-    return { scope, chain };
+    return { scope, listType: 'steps', steps };
   }
 
   const FLAG_TEXT = {
@@ -735,6 +746,46 @@
     y: '調べ始める位置（最初は先頭、続けて調べるときは前回の一致の終わり）でだけ一致を調べ、その先は探さない',
     d: '一致した位置の詳しい情報を記録する',
   };
+
+  // ---------- 入力欄の色分け ----------
+
+  // 構文木から、色分けする範囲 [開始, 終了, 種類] の一覧を作る。種類は app.js と style.css の tok-* と同じ名前
+  function tokens(ast) {
+    const out = [];
+    const add = (start, end, kind) => { if (end > start) out.push([start, end, kind]); };
+    (function walk(n, depth) {
+      switch (n.type) {
+        case 'alt':
+          n.alts.forEach((a, k) => {
+            walk(a, depth);
+            if (k < n.alts.length - 1) add(a.end, a.end + 1, 'alt');
+          });
+          break;
+        case 'seq': n.items.forEach((it) => walk(it, depth)); break;
+        case 'quant':
+          walk(n.target, depth);
+          add(n.qStart, n.end, 'quant');
+          break;
+        case 'group': {
+          const kind = n.kind.includes('look') ? 'look' : `group${depth % 3}`;
+          add(n.start, n.body.start, kind);
+          walk(n.body, depth + 1);
+          add(n.end - 1, n.end, kind);
+          break;
+        }
+        case 'class': case 'set': case 'uprop': case 'dot': add(n.start, n.end, 'class'); break;
+        case 'anchor': add(n.start, n.end, 'anchor'); break;
+        case 'backref': add(n.start, n.end, 'ref'); break;
+        case 'char': if (n.end - n.start > 1) add(n.start, n.end, 'esc'); break;
+        case 'literal':
+          // まとめた文字列の中の \. などのエスケープにも色を付ける
+          for (const part of n.parts || []) if (part.end - part.start > 1) add(part.start, part.end, 'esc');
+          break;
+        default: break;
+      }
+    })(ast, 0);
+    return out;
+  }
 
   function explain(src, flags) {
     const { ast, groupCount } = parse(src, flags);
@@ -755,5 +806,5 @@
     };
   }
 
-  global.RegexExplain = { parse, explain, RegexParseError, escapeHtml: esc };
+  global.RegexExplain = { parse, explain, tokens, RegexParseError, escapeHtml: esc };
 })(window);

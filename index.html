@@ -13,110 +13,132 @@
 </head>
 <body>
   <header class="site-header">
-    <h1>正規表現ビルダー</h1>
-    <p class="lead">部品を選んで正規表現を組み立てると、意味を日本語で表示します。JavaScript の正規表現の書き方に合わせています。</p>
-    <div class="layout-bar">
-      <span class="layout-label" id="layout-label">配置</span>
-      <div id="layout-picker" class="layout-picker" role="group" aria-labelledby="layout-label"></div>
+    <div class="head-row">
+      <h1>正規表現ビルダー</h1>
+      <details id="layout-menu" class="layout-menu">
+        <summary>配置：<span id="layout-current"></span></summary>
+        <div id="layout-picker" class="layout-picker" role="group" aria-label="欄の配置"></div>
+      </details>
     </div>
+    <p class="lead">部品を選んで正規表現を組み立てると、意味を日本語で表示します。JavaScript の正規表現の書き方に合わせています。</p>
   </header>
 
-  <main id="board" class="board">
-    <section class="panel card" data-card="pattern" aria-labelledby="pattern-title">
-      <div class="card-head">
-        <h2 id="pattern-title">正規表現</h2>
-      </div>
-      <div class="pattern-row">
-        <span class="slash">/</span>
-        <input id="pattern" type="text" spellcheck="false" autocomplete="off" aria-label="正規表現のパターン" placeholder="ここに正規表現を書くか、部品を押す">
-        <span class="slash">/</span>
-        <span id="flag-view" class="flag-view"></span>
-      </div>
-      <div class="pattern-tools">
-        <fieldset class="flags">
-          <legend>フラグ</legend>
-          <label title="すべての一致を探す"><input type="checkbox" value="g" checked> g 全部</label>
-          <label title="大文字と小文字を区別しない"><input type="checkbox" value="i"> i 大小無視</label>
-          <label title="^ と $ を各行に使う"><input type="checkbox" value="m"> m 複数行</label>
-          <label title=". を改行にも一致させる"><input type="checkbox" value="s"> s 改行も .</label>
-          <label title="Unicode モード"><input type="checkbox" value="u"> u Unicode</label>
-          <label title="前回の位置からだけ探す"><input type="checkbox" value="y"> y 位置固定</label>
-        </fieldset>
-        <div class="tool-buttons">
-          <select id="preset" aria-label="例を読み込む">
-            <option value="">例を読み込む…</option>
-          </select>
-          <button type="button" id="copy-literal" title="/…/flags の形でコピー">コピー</button>
-          <button type="button" id="copy-link" title="今の状態を開く URL をコピー">共有 URL</button>
-          <button type="button" id="clear">消去</button>
+  <main class="main">
+    <div class="pattern-dock">
+      <section class="panel card" data-card="pattern" aria-labelledby="pattern-title">
+        <div class="card-head">
+          <h2 id="pattern-title">正規表現</h2>
+          <span id="match-badge" class="badge" hidden></span>
         </div>
-      </div>
-      <p id="error" class="error" role="alert" hidden></p>
-    </section>
-
-    <section class="panel card palette" data-card="palette" aria-labelledby="palette-title">
-      <div class="card-head">
-        <h2 id="palette-title">部品</h2>
-      </div>
-      <p class="hint">押すとカーソルの位置に入ります。文字を選んでからグループの部品を押すと、選んだ部分を囲みます。</p>
-      <div id="palette"></div>
-
-      <div class="custom">
-        <h3>文字をそのまま入れる</h3>
-        <div class="inline-form">
-          <input id="literal-text" type="text" placeholder="例: example.com" aria-label="そのまま入れる文字">
-          <button type="button" id="literal-add">追加</button>
+        <div class="pattern-row">
+          <span class="slash">/</span>
+          <div class="editor pattern-editor">
+            <div id="pattern-view" class="editor-view" aria-hidden="true"></div>
+            <textarea id="pattern" rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="正規表現のパターン" placeholder="ここに正規表現を書くか、部品を押す"></textarea>
+          </div>
+          <span class="slash">/</span>
+          <span id="flag-view" class="flag-view"></span>
         </div>
-        <p class="hint">. や ( のように正規表現で特別な意味を持つ記号には、その文字そのものに一致するよう \ を付けて入れます。</p>
-
-        <h3>文字の集まりから 1文字</h3>
-        <div class="inline-form">
-          <input id="class-text" type="text" placeholder="例: a-z0-9_" aria-label="文字の集まり">
-          <button type="button" id="class-add">どれか</button>
-          <button type="button" id="class-neg-add">以外</button>
+        <div class="pattern-tools">
+          <fieldset class="flags">
+            <legend>フラグ</legend>
+            <label title="すべての一致を探す"><input type="checkbox" value="g" checked> g<span class="flag-desc"> 全部</span></label>
+            <label title="大文字と小文字を区別しない"><input type="checkbox" value="i"> i<span class="flag-desc"> 大小無視</span></label>
+            <label title="^ と $ を各行に使う"><input type="checkbox" value="m"> m<span class="flag-desc"> 複数行</span></label>
+            <label title=". を改行にも一致させる"><input type="checkbox" value="s"> s<span class="flag-desc"> 改行も .</span></label>
+            <label title="Unicode モード"><input type="checkbox" value="u"> u<span class="flag-desc"> Unicode</span></label>
+            <label title="前回の位置からだけ探す"><input type="checkbox" value="y"> y<span class="flag-desc"> 位置固定</span></label>
+          </fieldset>
+          <div class="tool-buttons">
+            <select id="preset" aria-label="例を読み込む">
+              <option value="">例を読み込む…</option>
+            </select>
+            <button type="button" id="copy-literal" title="/…/flags の形でコピー">コピー</button>
+            <button type="button" id="copy-link" title="今の状態を開く URL をコピー">共有 URL</button>
+            <button type="button" id="clear" title="正規表現を消す（Ctrl+Z で戻せます）">消去</button>
+          </div>
         </div>
-        <p class="hint">a-z のように - で範囲を書けます。</p>
+        <p id="error" class="error" role="alert" hidden></p>
+      </section>
+    </div>
 
-        <h3>回数を指定して繰り返す</h3>
-        <div class="inline-form">
-          <input id="rep-min" type="number" min="0" value="1" aria-label="最小回数">
-          <span>〜</span>
-          <input id="rep-max" type="number" min="0" placeholder="同じ" aria-label="最大回数">
-          <label class="nowrap"><input id="rep-inf" type="checkbox"> 上限なし</label>
-          <button type="button" id="rep-add">追加</button>
+    <div id="board" class="board">
+      <section class="panel card palette" data-card="palette" aria-labelledby="palette-title">
+        <div class="card-head">
+          <h2 id="palette-title">部品</h2>
+          <button type="button" id="palette-toggle" class="head-button" aria-expanded="true" aria-controls="palette-body">たたむ</button>
         </div>
-        <p class="hint">直前の部品を繰り返します。最大を空にすると、最小と同じ回数になります。</p>
-      </div>
-    </section>
+        <div id="palette-body">
+          <p class="hint">押すとカーソルの位置に入ります。文字を選んでからグループの部品を押すと、選んだ部分を囲みます。</p>
+          <div id="palette"></div>
 
-    <section class="panel card meaning" data-card="meaning" aria-labelledby="meaning-title">
-      <div class="card-head">
-        <h2 id="meaning-title">意味</h2>
-      </div>
-      <div id="mirror" class="mirror" aria-hidden="true"></div>
-      <h3>ひとことで</h3>
-      <p id="summary" class="summary"></p>
-      <h3>くわしく</h3>
-      <p class="hint">項目にマウスを乗せると、この欄のいちばん上に出ている正規表現の、対応する部分に色が付きます。</p>
-      <div id="tree" class="tree"></div>
-      <div id="flag-explain"></div>
-    </section>
+          <div class="custom">
+            <h3>文字をそのまま入れる</h3>
+            <div class="inline-form">
+              <input id="literal-text" type="text" placeholder="例: example.com" aria-label="そのまま入れる文字" data-submit="literal-add">
+              <button type="button" id="literal-add">追加</button>
+            </div>
+            <p class="hint">. や ( のように正規表現で特別な意味を持つ記号には、その文字そのものに一致するよう \ を付けて入れます。Enter キーでも追加できます。</p>
 
-    <section class="panel card tester" data-card="tester" aria-labelledby="tester-title">
-      <div class="card-head">
-        <h2 id="tester-title">試す</h2>
-      </div>
-      <label for="test-input" class="sr-only">試す文字列</label>
-      <textarea id="test-input" rows="6" spellcheck="false" placeholder="ここに文字列を入れると、一致した部分に色が付きます"></textarea>
-      <p id="match-count" class="match-count"></p>
-      <div id="highlight" class="highlight"></div>
-      <div id="match-table"></div>
-    </section>
+            <h3>文字の集まりから 1文字</h3>
+            <div class="inline-form">
+              <input id="class-text" type="text" placeholder="例: a-z0-9_" aria-label="文字の集まり" data-submit="class-add">
+              <button type="button" id="class-add">どれか</button>
+              <button type="button" id="class-neg-add">以外</button>
+            </div>
+            <p class="hint">a-z のように - で範囲を書けます。Enter キーを押すと、「どれか」のボタンと同じ部品が入ります。</p>
+
+            <h3>回数を指定して繰り返す</h3>
+            <div class="inline-form">
+              <input id="rep-min" type="number" min="0" value="1" aria-label="最小回数" data-submit="rep-add">
+              <span>〜</span>
+              <input id="rep-max" type="number" min="0" placeholder="同じ" aria-label="最大回数" data-submit="rep-add">
+              <label class="nowrap"><input id="rep-inf" type="checkbox"> 上限なし</label>
+              <button type="button" id="rep-add">追加</button>
+            </div>
+            <p class="hint">直前の部品を繰り返します。最大を空にすると、最小と同じ回数になります。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel card meaning" data-card="meaning" aria-labelledby="meaning-title">
+        <div class="card-head">
+          <h2 id="meaning-title">意味</h2>
+        </div>
+        <h3>ひとことで</h3>
+        <div id="summary" class="summary"></div>
+        <h3>くわしく</h3>
+        <p class="hint">項目にマウスを乗せると、上の正規表現の入力欄で、対応する部分に色が付きます。入力欄の中にカーソルを置くと、その位置の項目に色が付きます。</p>
+        <div id="tree" class="tree"></div>
+        <div id="flag-explain"></div>
+      </section>
+
+      <section class="panel card tester" data-card="tester" aria-labelledby="tester-title">
+        <div class="card-head">
+          <h2 id="tester-title">試す</h2>
+          <label class="head-option"><input type="checkbox" id="line-mode"> 行ごとに判定する</label>
+        </div>
+        <div class="editor test-editor">
+          <div id="test-view" class="editor-view" aria-hidden="true"></div>
+          <textarea id="test-input" rows="5" spellcheck="false" aria-label="試す文字列" placeholder="ここに文字列を入れると、一致した部分に色が付きます"></textarea>
+        </div>
+        <p id="match-count" class="match-count"></p>
+        <div id="match-table"></div>
+        <div id="line-panel" hidden>
+          <h3>行ごとの判定</h3>
+          <p class="hint">各行を別々の文字列として調べます（g と y のフラグは使いません）。行ごとに「一致するはず」か「一致しないはず」を選ぶと、期待どおりかを表示します。</p>
+          <p id="line-summary" class="line-summary"></p>
+          <div id="line-table"></div>
+        </div>
+      </section>
+    </div>
   </main>
 
+  <div id="toast-area" class="toast-area" role="status" aria-live="polite"></div>
   <p id="layout-status" class="sr-only" aria-live="polite"></p>
 
   <script src="regex-explain.js"></script>
+  <script src="match-core.js"></script>
   <script src="layout.js"></script>
   <script src="app.js"></script>
 </body>

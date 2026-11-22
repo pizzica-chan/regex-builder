@@ -1,6 +1,7 @@
 /*
  * 欄（カード）の配置を、用意した型から選んで切り替える。
  * 型は CSS グリッドの領域（grid-template-areas）で表し、選んだ型は localStorage に保存する。
+ * 「正規表現」の欄は型にかかわらず画面の上に固定するので、型で並べるのは「部品」「意味」「試す」の 3 つ。
  * 画面の幅が狭いときは、型にかかわらず縦一列になる（style.css）。
  */
 (function () {
@@ -13,11 +14,10 @@
     {
       id: 'standard',
       name: '標準',
-      desc: '上に「正規表現」、中段に「部品」と「意味」を左右に並べ、下に「試す」',
+      desc: '「部品」と「意味」を左右に並べ、下に「試す」',
       cols: 'minmax(0, 1fr) minmax(0, 1fr)',
-      rows: 'auto auto auto',
+      rows: 'auto auto',
       areas: [
-        ['pattern', 'pattern'],
         ['palette', 'meaning'],
         ['tester', 'tester'],
       ],
@@ -25,11 +25,10 @@
     {
       id: 'palette-left',
       name: '部品を左に',
-      desc: '左に「部品」、右に「正規表現」・「意味」・「試す」を縦に並べる',
+      desc: '左に「部品」、右に「意味」と「試す」を縦に並べる',
       cols: 'minmax(0, 2fr) minmax(0, 3fr)',
-      rows: 'auto auto 1fr',
+      rows: 'auto 1fr',
       areas: [
-        ['palette', 'pattern'],
         ['palette', 'meaning'],
         ['palette', 'tester'],
       ],
@@ -37,11 +36,10 @@
     {
       id: 'meaning-right',
       name: '意味を右に',
-      desc: '左に「正規表現」・「部品」・「試す」を縦に並べ、右に「意味」',
+      desc: '左に「部品」と「試す」を縦に並べ、右に「意味」',
       cols: 'minmax(0, 3fr) minmax(0, 2fr)',
-      rows: 'auto auto 1fr',
+      rows: 'auto 1fr',
       areas: [
-        ['pattern', 'meaning'],
         ['palette', 'meaning'],
         ['tester', 'meaning'],
       ],
@@ -49,11 +47,10 @@
     {
       id: 'test-focus',
       name: '試すを上に',
-      desc: '上に「正規表現」、中段に「試す」と「意味」を左右に並べ、下に「部品」',
+      desc: '「試す」と「意味」を左右に並べ、下に「部品」',
       cols: 'minmax(0, 1fr) minmax(0, 1fr)',
-      rows: 'auto auto auto',
+      rows: 'auto auto',
       areas: [
-        ['pattern', 'pattern'],
         ['tester', 'meaning'],
         ['palette', 'palette'],
       ],
@@ -61,11 +58,10 @@
     {
       id: 'test-second',
       name: '試すを2段目に',
-      desc: '上に「正規表現」、その下に「試す」、いちばん下に「部品」と「意味」を左右に並べる',
+      desc: '上に「試す」、下に「部品」と「意味」を左右に並べる',
       cols: 'minmax(0, 1fr) minmax(0, 1fr)',
-      rows: 'auto auto auto',
+      rows: 'auto auto',
       areas: [
-        ['pattern', 'pattern'],
         ['tester', 'tester'],
         ['palette', 'meaning'],
       ],
@@ -73,10 +69,10 @@
     {
       id: 'single',
       name: '縦一列',
-      desc: '「正規表現」・「部品」・「意味」・「試す」を縦一列に並べる',
+      desc: '「部品」・「意味」・「試す」を縦一列に並べる',
       cols: 'minmax(0, 1fr)',
-      rows: 'auto auto auto auto',
-      areas: [['pattern'], ['palette'], ['meaning'], ['tester']],
+      rows: 'auto auto auto',
+      areas: [['palette'], ['meaning'], ['tester']],
     },
   ];
 
@@ -86,6 +82,8 @@
   const board = document.getElementById('board');
   const picker = document.getElementById('layout-picker');
   const statusEl = document.getElementById('layout-status');
+  const menu = document.getElementById('layout-menu');
+  const currentEl = document.getElementById('layout-current');
 
   const areasCss = (areas) => areas.map((row) => `"${row.join(' ')}"`).join(' ');
 
@@ -96,6 +94,7 @@
     for (const btn of picker.querySelectorAll('button')) {
       btn.setAttribute('aria-pressed', String(btn.dataset.preset === preset.id));
     }
+    currentEl.textContent = preset.name;
   }
 
   function save(id) {
@@ -110,9 +109,11 @@
     const thumb = document.createElement('span');
     thumb.className = 'layout-thumb';
     thumb.setAttribute('aria-hidden', 'true');
+    // 図では、上に固定される「正規表現」の欄も 1 段目に描く
+    const width = preset.areas[0].length;
     thumb.style.gridTemplateColumns = preset.cols;
-    thumb.style.gridTemplateAreas = areasCss(preset.areas);
-    const ids = [...new Set(preset.areas.flat())];
+    thumb.style.gridTemplateAreas = areasCss([Array(width).fill('pattern'), ...preset.areas]);
+    const ids = ['pattern', ...new Set(preset.areas.flat())];
     for (const id of ids) {
       const cell = document.createElement('span');
       cell.className = `layout-cell cell-${id}`;
@@ -138,9 +139,22 @@
       applyPreset(preset);
       save(preset.id);
       statusEl.textContent = `配置を「${preset.name}」にしました`;
+      menu.open = false;
+      menu.querySelector('summary').focus();
     });
     picker.append(btn);
   }
+
+  // メニューの外を押したときと、Esc キーを押したときに閉じる
+  document.addEventListener('click', (e) => {
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  });
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.open) {
+      menu.open = false;
+      menu.querySelector('summary').focus();
+    }
+  });
 
   const saved = PRESETS.find((p) => p.id === load());
   applyPreset(saved || PRESETS[0]);
