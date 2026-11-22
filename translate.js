@@ -28,6 +28,31 @@
     return [...out];
   }
 
+  // グループの番号ごとに、一致しないまま終わることがあるか（optional）と、グループの終わりの位置（end）
+  function groupInfo(ast) {
+    const info = new Map();
+    (function walk(n, optional) {
+      if (!n || typeof n !== 'object') return;
+      if (n.type === 'alt') { n.alts.forEach((a) => walk(a, true)); return; }
+      if (n.type === 'quant') { walk(n.target, optional || n.min === 0); return; }
+      if (n.type === 'group') {
+        if (n.index && !info.has(n.index)) info.set(n.index, { optional, end: n.end });
+        // 否定の先読み・後読みの中のグループは、一致したあとには残らない
+        walk(n.body, optional || n.kind === 'neglookahead' || n.kind === 'neglookbehind');
+        return;
+      }
+      if (n.type === 'seq') n.items.forEach((it) => walk(it, optional));
+    })(ast, false);
+    return info;
+  }
+
+  // 一致しなかったグループを参照するおそれがあるか。参照がグループの終わりより前にある（\1(a) や (a\1)）ときも、
+  // 参照する時点ではグループに何も入っていない
+  function mayBeUnset(ref, info) {
+    const g = info.get(ref.index);
+    return !g || g.optional || ref.start < g.end;
+  }
+
   function translate(src, flags, dialect) {
     const RE = global.RegexExplain;
     const D = global.RegexDialects;
@@ -41,19 +66,19 @@
     // ---------- 1 回目: JavaScript でのグループの番号を決める ----------
     let next = 0;
     const groupMap = new Array(groupCount + 1).fill(null);
-    const optionalGroups = new Set();
+    const groups = groupInfo(ast);
     let scopedCase = false;
-    (function walk(n, optional) {
+    (function walk(n) {
       switch (n.type) {
         case 'seq': n.items.forEach((it, k) => {
           // 先頭以外の (?i) や、i を外す指定があると、範囲ごとに大文字と小文字を扱う必要がある
           if (it.type === 'flags' && (k > 0 || n !== ast || /i/.test(it.off)) && /i/.test(it.on + it.off)) scopedCase = true;
-          walk(it, optional);
+          walk(it);
         }); break;
-        case 'alt': n.alts.forEach((a) => walk(a, true)); break;
+        case 'alt': n.alts.forEach(walk); break;
         case 'quant':
           if (n.possessive) n.jsExtra = ++next;
-          walk(n.target, optional || n.min === 0);
+          walk(n.target);
           break;
         case 'group':
           if (n.kind === 'modifier' && /i/.test(n.modOn + n.modOff)) scopedCase = true;
@@ -62,13 +87,12 @@
             n.jsIndex = ++next;
             if (groupMap[n.index] == null) groupMap[n.index] = n.jsIndex;
             else notes.add('同じ名前のグループが 2 つ以上あります。試す欄の表には、最初のグループの値を出します。');
-            if (optional) optionalGroups.add(n.index);
           }
-          walk(n.body, optional);
+          walk(n.body);
           break;
         default: break;
       }
-    })(ast, false);
+    })(ast);
 
     // 大文字と小文字を区別しない指定が全体に同じように効くなら、JavaScript の i フラグに任せる
     const leadingFlags = ast.type === 'seq' && ast.items[0] && ast.items[0].type === 'flags' ? ast.items[0] : null;
@@ -89,15 +113,16 @@
       const java = dialect === 'java';
       const endNl = D.dollarBeforeFinal(dialect);
       const atEnd = '(?![^])';
+      // Java は、最後の改行が CRLF のとき、CR と LF の間には一致しない
       const beforeFinal = endNl === 'any'
-        ? '(?=(?:\\u{d}\\u{a}|[\\u{a}\\u{d}\\u{85}\\u{2028}\\u{2029}])?(?![^]))'
+        ? '(?=(?:\\u{d}\\u{a}|(?<!\\u{d})\\u{a}|[\\u{d}\\u{85}\\u{2028}\\u{2029}])?(?![^]))'
         : endNl === 'nl' ? '(?=\\u{a}?(?![^]))' : atEnd;
       switch (kind) {
         case 'start':
           if (!ctx.m) return '(?<![^])';
-          return java
-            ? '(?:(?<![^])|(?:(?<=[\\u{a}\\u{85}\\u{2028}\\u{2029}])|(?<=\\u{d})(?!\\u{a}))(?=[^]))'
-            : '(?:(?<![^])|(?<=\\u{a}))';
+          if (java) return '(?:(?<![^])|(?:(?<=[\\u{a}\\u{85}\\u{2028}\\u{2029}])|(?<=\\u{d})(?!\\u{a}))(?=[^]))';
+          // PHP とサクラエディタは、文字列が改行で終わるとき、その改行のあと（文字列の末尾）には一致しない
+          return D.caretNotAtEnd(dialect) ? '(?:(?<![^])|(?<=\\u{a})(?=[^]))' : '(?:(?<![^])|(?<=\\u{a}))';
         case 'end':
           if (!ctx.m) return beforeFinal;
           return java
@@ -176,6 +201,13 @@
       return q + (n.lazy ? '?' : '');
     }
 
+    // 一度一致したら戻って試し直さない部分（アトミックグループと強欲な繰り返し）。
+    // 先読みで一致させた文字列をグループ extra に覚え、その文字列を後方参照で読み進める。
+    // 後読みの中では右から左へ照らし合わせるので、後読みで覚えてから後方参照を置く
+    function noBacktrack(body, extra, ctx) {
+      return ctx.behind ? `(?:\\${extra}(?<=(${body})))` : `(?:(?=(${body}))\\${extra})`;
+    }
+
     function withFlags(ctx, on, off) {
       const c = { ...ctx };
       for (const f of off) c[f] = false;
@@ -187,7 +219,8 @@
       switch (n.type) {
         case 'seq': {
           let out = '';
-          let c = ctx;
+          // 「または」の 2 つ目からの候補には、前の候補に書いた (?i) なども効く
+          let c = n.flagsIn ? withFlags(ctx, n.flagsIn.on, n.flagsIn.off) : ctx;
           for (const it of n.items) {
             if (it.type === 'flags') { c = withFlags(c, it.on, it.off); continue; }
             out += emit(it, c);
@@ -208,7 +241,10 @@
           const body = n.items.map((it) => classItem(it, ctx)).join('');
           return n.negate ? `[^${body}]` : `[${body}]`;
         }
-        case 'linebreak': return '(?:\\u{d}\\u{a}|[\\u{a}-\\u{d}\\u{85}\\u{2028}\\u{2029}])';
+        // PHP とサクラエディタの \R は、CRLF に一致したら CR だけに戻って試し直さない
+        case 'linebreak': return D.atomicLinebreak(dialect)
+          ? '(?:\\u{d}\\u{a}|\\u{d}(?!\\u{a})|[\\u{a}-\\u{c}\\u{85}\\u{2028}\\u{2029}])'
+          : '(?:\\u{d}\\u{a}|[\\u{a}-\\u{d}\\u{85}\\u{2028}\\u{2029}])';
         case 'anchor': return anchor(n.kind, ctx);
         case 'comment': case 'flags': return '';
         case 'backref': {
@@ -216,13 +252,16 @@
           const js = groupMap[n.index];
           if (js == null) throw new Untranslatable('参照しているグループが見つかりません');
           if (ctx.i && !useJsI) notes.add('大文字と小文字を区別しない後方参照は、試す欄では大文字と小文字を区別して比べています。');
-          if (optionalGroups.has(n.index)) {
+          if (mayBeUnset(n, groups)) {
             notes.add('一致しなかったグループを参照すると、この言語では失敗しますが、試す欄では空文字列として一致したものとして扱います。');
           }
           return `(?:\\${js})`;
         }
         case 'group': {
-          const c = n.kind === 'modifier' ? withFlags(ctx, n.modOn, n.modOff) : ctx;
+          let c = n.kind === 'modifier' ? withFlags(ctx, n.modOn, n.modOff) : ctx;
+          // 後読みの中は、JavaScript が右から左へ照らし合わせる。先読みの中では、また左から右へ照らし合わせる
+          if (/lookbehind/.test(n.kind)) c = { ...c, behind: true };
+          else if (/lookahead/.test(n.kind)) c = { ...c, behind: false };
           const body = emit(n.body, c);
           switch (n.kind) {
             case 'capture': case 'named': return `(${body})`;
@@ -231,13 +270,13 @@
             case 'neglookahead': return `(?!${body})`;
             case 'lookbehind': return `(?<=${body})`;
             case 'neglookbehind': return `(?<!${body})`;
-            case 'atomic': return `(?:(?=(${body}))\\${n.jsExtra})`;
+            case 'atomic': return noBacktrack(body, n.jsExtra, ctx);
             default: throw new Untranslatable('このグループは、試す欄では動かせません');
           }
         }
         case 'quant': {
           const t = `(?:${emit(n.target, ctx)})${quantText(n)}`;
-          return n.possessive ? `(?:(?=(${t}))\\${n.jsExtra})` : t;
+          return n.possessive ? noBacktrack(t, n.jsExtra, ctx) : t;
         }
         default: throw new Untranslatable('この部品は、試す欄では動かせません');
       }
@@ -264,10 +303,15 @@
   // 構文木から、言語によって意味の変わる部品が使われているかを集める
   function usedFeatures(ast, flags) {
     const f = { digit: false, word: false, space: false, dot: false, dollar: false, lineAnchor: false, backref: false, named: false, numbered: false, caseless: flags.includes('i') };
+    const groups = groupInfo(ast);
     (function walk(n, ctx) {
       switch (n.type) {
         case 'seq': {
           let c = ctx;
+          if (n.flagsIn) {
+            const on = n.flagsIn.on;
+            c = { ...c, m: c.m || on.includes('m'), s: c.s || on.includes('s') };
+          }
           for (const it of n.items) {
             if (it.type === 'flags') { c = { ...c, i: c.i || it.on.includes('i'), m: c.m || it.on.includes('m'), s: c.s || it.on.includes('s') }; if (it.on.includes('i')) f.caseless = true; continue; }
             walk(it, c);
@@ -295,7 +339,8 @@
           if ((n.kind === 'start' || n.kind === 'end') && ctx.m) f.lineAnchor = true;
           if ((n.kind === 'start' || n.kind === 'end') && !ctx.m) f.plainAnchor = true;
           break;
-        case 'backref': f.backref = true; break;
+        // 参照する時点でいつも一致しているグループなら、どの言語でも結果は同じ
+        case 'backref': if (mayBeUnset(n, groups)) f.backref = true; break;
         default: break;
       }
     })(ast, { m: flags.includes('m'), s: flags.includes('s') });
@@ -336,6 +381,7 @@
       if (!n || typeof n !== 'object' || found) return;
       if (n.type === 'anchor' && NOT_IN_JS.anchor.includes(n.kind)) found = `${src.slice(n.start, n.end)} は使えません`;
       else if (n.type === 'group' && n.kind === 'atomic') found = '(?>…)（アトミックグループ）は使えません';
+      else if (n.type === 'group' && n.isolated) found = '(?i) のようなフラグの書き方は使えません';
       else if (n.type === 'quant' && n.possessive) found = '*+ のような強欲な繰り返しは使えません';
       else if (NOT_IN_JS.type.includes(n.type)) found = { flags: '(?i) のようなフラグの書き方は使えません', comment: '(?#…) は使えません', linebreak: '\\R は使えません' }[n.type];
       else if (n.type === 'set' && /[hv]space/.test(n.kind)) found = '\\h や \\v（空白の集まり）は使えません';

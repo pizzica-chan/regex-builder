@@ -1,5 +1,5 @@
 /*
- * JavaScript の正規表現を構文木に分解し、日本語の説明を作る。
+ * 正規表現を言語ごとの書き方（dialects.js）で構文木に分解し、日本語の説明を作る。
  * 外部ライブラリは使わない。v フラグの集合演算には対応しない。
  */
 (function (global) {
@@ -30,7 +30,8 @@
   }
 
   // dialect は dialects.js の言語の id（js、python、java、php、cs、go、sakura）。言語ごとに受け付ける書き方を変える
-  function parse(src, flags, dialect = 'js') {
+  // opts.scan が true のときは、グループの数を数えるためだけに読む（C# の \12 を後方参照か8進数か決めるのに使う）
+  function parse(src, flags, dialect = 'js', opts = {}) {
     const D = global.RegexDialects;
     if (!D || !D.ids.includes(dialect)) dialect = 'js';
     const isJs = dialect === 'js';
@@ -51,6 +52,13 @@
     const groups = [];
 
     const err = (msg, pos = i) => { throw new RegexParseError(msg, pos); };
+
+    // 正規表現全体のグループの数。C# は、\12 のような 2 桁以上の数字を、その番号のグループがあるときだけ後方参照にする
+    let total = null;
+    const totalGroups = () => {
+      if (total == null) total = opts.scan ? Infinity : parse(src, flags, dialect, { scan: true }).groupCount;
+      return total;
+    };
 
     function readChar() {
       const ch = codeUnits ? src[i] : String.fromCodePoint(src.codePointAt(i));
@@ -76,6 +84,18 @@
         alts.push(parseSeq());
       }
       if (alts.length === 1) return alts[0];
+      // (?i) のようにフラグだけを書くと、グループの終わりまで効くので、あとの「または」の候補にも効く。
+      // 2 つ目からの候補に、前の候補までに付け外ししたフラグを flagsIn として持たせる
+      let on = '';
+      let off = '';
+      for (const a of alts) {
+        if (on || off) a.flagsIn = { on, off };
+        for (const it of a.items) {
+          if (it.type !== 'flags') continue;
+          for (const f of it.off) { on = on.replace(f, ''); if (!off.includes(f)) off += f; }
+          for (const f of it.on) { off = off.replace(f, ''); if (!on.includes(f)) on += f; }
+        }
+      }
       return { type: 'alt', alts, start, end: i };
     }
 
@@ -83,7 +103,20 @@
       const start = i;
       const items = [];
       while (i < src.length && src[i] !== '|' && src[i] !== ')') {
-        items.push(parseQuant(parseAtom()));
+        const atom = parseQuant(parseAtom());
+        // サクラエディタ（Onigmo）は、(?i) からグループの終わりまでを 1 つのまとまりとして読む。
+        // そのため a(?i)b|c は a(?i:b|c) と同じになる（ほかの言語では (?:ab|(?i)c) に近い）。
+        // (?i) の前に何もなければ、どちらの読み方でも意味は同じなので、まとめない
+        if (atom.type === 'flags' && dialect === 'sakura' && items.some((it) => it.type !== 'comment')) {
+          const rest = parseAlt();
+          if (rest.type === 'alt') {
+            items.push({ type: 'group', kind: 'modifier', isolated: true, name: null, index: null, modOn: atom.on, modOff: atom.off, body: rest, start: atom.start, end: i });
+          } else {
+            items.push(atom, ...rest.items);
+          }
+          break;
+        }
+        items.push(atom);
       }
       return { type: 'seq', items: mergeLiterals(items), start, end: i };
     }
@@ -317,10 +350,33 @@
       }
       if (c === 'G') err('このツールは \\G（探し始めた位置）には対応していません', start);
       if (/[1-9]/.test(c)) {
+        const digits = /^\d+/.exec(src.slice(i))[0];
+        const num = Number(digits);
+        const octLen = /^[0-7]{0,3}/.exec(digits)[0].length;
+        // 後方参照ではなく8進数の文字コードとして読む。C# は 255 を超える値の上の桁を捨てる
+        const octalChar = (len) => {
+          const cp = parseInt(digits.slice(0, len), 8);
+          i += len;
+          return { type: 'char', value: String.fromCodePoint(dialect === 'cs' ? cp & 0xff : cp), start, end: i };
+        };
+        // 8進数として読むかどうかは、言語ごとに違う（docs/dialects/ の各言語の資料）
+        if (dialect === 'python' && octLen === 3) {
+          if (parseInt(digits.slice(0, 3), 8) > 0o377) err('Python では、8進数の文字コードは \\377 までです', start);
+          return octalChar(3); // Python は 3 桁の8進数なら文字コード
+        }
+        if (dialect === 'go' && octLen >= 2) return octalChar(octLen); // Go は 1 桁だけなら誤り、2 桁以上なら8進数
+        // PHP はその位置までのグループの数、C# は全体のグループの数を超える 2 桁以上の数字を、8進数として読む
+        if (dialect === 'php' && num >= 10 && octLen && num > groupCount) return octalChar(octLen);
+        if (dialect === 'cs' && num >= 10 && octLen && num > totalGroups()) return octalChar(octLen);
         if (!can('backref')) err(`${dsub}では、\\1 のような後方参照は使えません`, start);
-        const m = (dialect === 'python' ? /^\d{1,2}/ : /^\d+/).exec(src.slice(i));
-        i += m[0].length;
-        const ref = { type: 'backref', index: Number(m[0]), raw: m[0], start, end: i };
+        let len = dialect === 'python' ? Math.min(2, digits.length) : digits.length;
+        if (dialect === 'java') {
+          // Java は、その位置までにあるグループの数を超えない桁まで読み、残りの数字は文字として読む
+          len = 1;
+          while (len < digits.length && Number(digits.slice(0, len + 1)) <= groupCount) len++;
+        }
+        i += len;
+        const ref = { type: 'backref', index: Number(digits.slice(0, len)), raw: digits.slice(0, len), start, end: i };
         numRefs.push(ref);
         return ref;
       }
@@ -557,6 +613,7 @@
       const g = groups.find((x) => x.name === ref.name);
       if (g) ref.index = g.index;
     }
+    if (opts.scan) return { ast, groupCount, dialect };
     for (const ref of numRefs) {
       if (ref.index <= groupCount) continue;
       // Java は、ないグループへの参照を誤りにしない（一致しないだけ）
@@ -567,8 +624,31 @@
     // 後読みの中身の長さを確かめる
     const rule = isJs ? 'any' : D.lookbehind(dialect);
     for (const lb of lookbehinds) checkLookbehind(lb, rule, dsub, err);
+    if (dialect === 'sakura') for (const lb of lookbehinds) checkSakuraLookbehind(lb, err);
 
     return { ast, groupCount, dialect };
+  }
+
+  // サクラエディタ（Onigmo）の後読みの中に書けないもの（tools/dialect-probe で実際に動かして調べた）
+  function checkSakuraLookbehind(lb, err) {
+    const negative = lb.kind === 'neglookbehind';
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (n.type === 'backref') err('サクラエディタでは、後読みの中に後方参照（\\1 など）は書けません', n.start);
+      if (n.type === 'quant' && n.possessive) err('サクラエディタでは、後読みの中に強欲な繰り返し（*+ など）は書けません', n.qStart);
+      if (n.type === 'group') {
+        if (n.kind === 'atomic') err('サクラエディタでは、後読みの中に (?>…) は書けません', n.start);
+        if (n.kind === 'lookahead' || n.kind === 'neglookahead') err('サクラエディタでは、後読みの中に先読み（(?=…) など）は書けません', n.start);
+        if (negative && (n.kind === 'capture' || n.kind === 'named')) {
+          err('サクラエディタでは、否定の後読み (?<!…) の中にグループ ( ) は書けません。(?:…) を使います', n.start);
+        }
+      }
+      for (const k of ['items', 'alts', 'body', 'target']) {
+        const v = n[k];
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v) walk(v);
+      }
+    })(lb.body);
   }
 
   // 部品が一致する長さの [最小, 最大]。最大が決まらないときは Infinity
@@ -599,7 +679,10 @@
     const body = lb.body;
     const top = body.type === 'alt' ? body.alts : [body];
     if (rule === 'bounded') {
-      if (widthOf(body)[1] === Infinity) err(`${dsub}では、後読みの中に * や + のような上限のない繰り返しは使えません`, lb.start);
+      // Java 21 は (?<=a+) を受け付けるが、(?<=a+b+)c が aabbc に一致しないなど、正しく一致しないことがある（実際の結果）
+      if (widthOf(body)[1] === Infinity) {
+        err(`${dsub}の後読みの中の * や + のような上限のない繰り返しは、正しく一致しないことがあるので、誤りとして扱います。{1,10} のように上限を決めて書きます`, lb.start);
+      }
       return;
     }
     if (rule === 'fixed') {
@@ -776,6 +859,11 @@
     alpha: '英字', digit: '数字', alnum: '英数字', upper: '大文字', lower: '小文字', space: '空白', punct: '記号',
     xdigit: '16進数の数字', word: '単語の文字', blank: 'スペースとタブ', cntrl: '制御文字', print: '表示できる文字', graph: '空白以外の表示できる文字',
   };
+  // PHP とサクラエディタでは、POSIX の文字クラスが英字以外にも広がる（Go は英字などの ASCII だけ）
+  const POSIX_NAMES_UNICODE = {
+    alpha: '文字（ひらがなや漢字も含む）', digit: '数字（全角数字なども含む）', alnum: '文字と数字（ひらがなや漢字、全角数字も含む）',
+    word: '文字・数字と _', blank: '横方向の空白（全角スペースも含む）', space: '空白（全角スペースも含む）', punct: '句読点と記号',
+  };
 
   function upropNoun(node) {
     const key = node.value.replace(/^(?:sc|Script_Extensions|scx)=/, 'Script=');
@@ -792,7 +880,8 @@
     if (it.type === 'set') return setItem(it.kind, ctx);
     if (it.type === 'uprop') return upropNoun(it);
     if (it.type === 'posix') {
-      const name = `${POSIX_NAMES[it.name] || esc(it.name)}（[:${esc(it.name)}:]）`;
+      const names = !isJsCtx(ctx) && ctx.dialect !== 'go' ? { ...POSIX_NAMES, ...POSIX_NAMES_UNICODE } : POSIX_NAMES;
+      const name = `${names[it.name] || esc(it.name)}（[:${esc(it.name)}:]）`;
       return it.negate ? `${name} 以外` : name;
     }
     return charHtml(it.value);
@@ -918,6 +1007,9 @@
     return parts.join('、');
   }
 
+  // 「または」の 2 つ目からの候補には、前の候補に書いた (?i) なども効く（parse の flagsIn）
+  const seqCtx = (seq, ctx) => (seq.flagsIn ? applyFlags(ctx, seq.flagsIn.on, seq.flagsIn.off) : ctx);
+
   // 並びの部品を順に処理する。(?i) のようなフラグがあれば、そのあとの部品にだけ効かせる
   function mapSeq(items, ctx, fn) {
     let c = ctx;
@@ -939,7 +1031,10 @@
       case 'neglookahead': return `すぐ後ろに次が続かないこと${LOOK_NOTE}`;
       case 'lookbehind': return `すぐ前に次があること${LOOK_NOTE}`;
       case 'neglookbehind': return `すぐ前に次がないこと${LOOK_NOTE}`;
-      case 'modifier': return `この中だけ、${flagsText(node.modOn, node.modOff)}`;
+      case 'modifier':
+        // サクラエディタの a(?i)b|c は、(?i) からグループの終わりまでを 1 つのまとまりとして読む
+        if (node.isolated) return `ここから後ろ（グループの終わりまで。あとの「または」の候補も、このまとまりに入る）は、${flagsText(node.modOn, node.modOff)}`;
+        return `この中だけ、${flagsText(node.modOn, node.modOff)}`;
       case 'atomic': return '次をひとまとまりにして、一度一致したら戻って試し直さない（アトミックグループ）';
       default: return 'グループ';
     }
@@ -949,6 +1044,7 @@
 
   function bodyChildren(body, ctx) {
     if (body.type === 'seq') {
+      ctx = seqCtx(body, ctx);
       if (body.items.length === 0) return [{ html: EMPTY, start: body.start, end: body.end }];
       return mapSeq(body.items, ctx, describe);
     }
@@ -962,7 +1058,7 @@
       case 'literal': return `${stringHtml(node.value)} という文字列`;
       case 'anchor': return anchorTree(node, ctx);
       case 'backref': return backrefText(node, ctx);
-      case 'flags': return `ここから後ろ（このグループの終わりまで）は、${flagsText(node.on, node.off)}`;
+      case 'flags': return `ここから後ろ（グループの終わりまで。あとに続く「または」の候補にも効く）は、${flagsText(node.on, node.off)}`;
       case 'comment': return 'コメント（一致には関係しない）';
       case 'linebreak': return '改行 1 つ（CRLF・LF・CR など）';
       default: {
@@ -974,6 +1070,7 @@
 
   // 説明の木を作る。各要素は { html, start, end, children, listType }
   function describe(node, ctx) {
+    if (node.type === 'seq') ctx = seqCtx(node, ctx);
     const leaf = leafTree(node, ctx);
     if (leaf != null) return { html: leaf, start: node.start, end: node.end };
     const base = { start: node.start, end: node.end };
@@ -1080,7 +1177,7 @@
         return `グループ${node.index}と同じ文字列`;
       case 'seq':
         return node.items.length
-          ? mapSeq(node.items, ctx, short).filter((t) => t).join(` ${ARROW} `) || '何もない'
+          ? mapSeq(node.items, seqCtx(node, ctx), short).filter((t) => t).join(` ${ARROW} `) || '何もない'
           : '何もない';
       case 'flags': return `〔ここから後ろは、${flagsText(node.on, node.off)}〕`;
       case 'comment': return '';
@@ -1186,6 +1283,12 @@
           add(n.qStart, n.end, 'quant');
           break;
         case 'group': {
+          // サクラエディタの (?i) からグループの終わりまでのまとまりには、閉じ括弧がない
+          if (n.isolated) {
+            add(n.start, n.body.start, 'look');
+            walk(n.body, depth);
+            break;
+          }
           const kind = n.kind.includes('look') ? 'look' : `group${depth % 3}`;
           add(n.start, n.body.start, kind);
           walk(n.body, depth + 1);

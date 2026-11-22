@@ -110,6 +110,12 @@
   // m フラグのとき、^ と $ が区切りとみなす改行
   const LINE_BREAKS = { js: 'js', java: 'java', python: 'lf', php: 'lf', cs: 'lf', go: 'lf', sakura: 'lf' };
 
+  // m フラグの ^ が文字列の最後の改行のあと（文字列の末尾）には一致しない言語。Java は LINE_BREAKS の 'java' で扱う
+  const CARET_NOT_AT_END = ['php', 'sakura'];
+
+  // \R が CRLF を分けない（CRLF に一致したら、CR だけに戻って試し直さない）言語。Java は試し直す
+  const ATOMIC_LINEBREAK = ['php', 'sakura'];
+
   // 大文字と小文字を区別しない指定が、英字（ASCII）だけに効く言語
   const ASCII_CASE_ONLY = ['java'];
 
@@ -143,19 +149,28 @@
     return null;
   }
 
-  // POSIX の文字クラス（[[:alpha:]]）。Go は ASCII だけ、PHP（u 修飾子あり）とサクラエディタは Unicode に広がる
-  const POSIX_ASCII = {
-    alpha: 'A-Za-z', digit: '0-9', alnum: 'A-Za-z0-9', upper: 'A-Z', lower: 'a-z', space: '\\t-\\r\\x20',
-    xdigit: '0-9A-Fa-f', word: 'A-Za-z0-9_', blank: '\\t\\x20', cntrl: '\\x00-\\x1f\\x7f',
-    punct: '!-\\/:-@\\[-`{-~', print: '\\x20-\\x7e', graph: '!-~',
-  };
-  const POSIX_UNICODE = {
-    alpha: '\\p{L}', digit: '\\p{Nd}', alnum: '\\p{L}\\p{Nd}', upper: '\\p{Lu}', lower: '\\p{Ll}', xdigit: '0-9A-Fa-f',
-    word: '\\p{L}\\p{N}_', blank: '\\t\\x20\\xa0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000',
+  // POSIX の文字クラス（[[:alpha:]]）。Go は ASCII だけ、PHP（u 修飾子あり）とサクラエディタは Unicode に広がる。
+  // 広がり方は PHP とサクラエディタで違う（tools/dialect-probe/cases.json で各言語の処理系と照らし合わせた）。
+  // 表にない名前（graph と print）は、試す欄では動かせない
+  const ASCII_SYMBOLS = '\\x24\\x2b\\x3c-\\x3e\\x5e\\x60\\x7c\\x7e'; // 記号のうち ASCII のもの（$ + < = > ^ ` | ~）
+  const POSIX = {
+    go: {
+      alpha: 'A-Za-z', digit: '0-9', alnum: 'A-Za-z0-9', upper: 'A-Z', lower: 'a-z', space: '\\t-\\r\\x20',
+      xdigit: '0-9A-Fa-f', word: 'A-Za-z0-9_', blank: '\\t\\x20', cntrl: '\\x00-\\x1f\\x7f',
+      punct: '!-\\/:-@\\[-`\\{-~', print: '\\x20-\\x7e', graph: '!-~',
+    },
+    php: {
+      alpha: '\\p{L}', digit: '\\p{Nd}', alnum: '\\p{L}\\p{N}', upper: '\\p{Lu}', lower: '\\p{Ll}', xdigit: '0-9A-Fa-f',
+      word: '\\p{L}\\p{N}_', blank: SETS.hspace, space: SETS.space.php, cntrl: '\\p{Cc}', punct: `\\p{P}${ASCII_SYMBOLS}`,
+    },
+    sakura: {
+      alpha: '\\p{Alphabetic}', digit: '\\p{Nd}', alnum: '\\p{Alphabetic}\\p{Nd}', upper: '\\p{Uppercase}', lower: '\\p{Lowercase}',
+      xdigit: '0-9A-Fa-f', word: '\\p{Alphabetic}\\p{M}\\p{Nd}\\p{Pc}', blank: '\\t\\p{Zs}', space: SETS.space.sakura,
+      cntrl: '\\p{Cc}', punct: `\\p{P}${ASCII_SYMBOLS}`,
+    },
   };
   function posixToJs(name, dialect) {
-    if (dialect === 'go') return POSIX_ASCII[name] || null;
-    return POSIX_UNICODE[name] || null;
+    return (POSIX[dialect] || {})[name] || null;
   }
 
   // 言語ごとに使えるフラグ。js 以外の g は「試す欄ですべての一致を探す」だけの意味
@@ -232,6 +247,8 @@
     dotExcludes: (dialect) => DOT_EXCLUDES[dialect],
     dollarBeforeFinal: (dialect) => DOLLAR_BEFORE_FINAL[dialect],
     lineBreaks: (dialect) => LINE_BREAKS[dialect],
+    caretNotAtEnd: (dialect) => CARET_NOT_AT_END.includes(dialect),
+    atomicLinebreak: (dialect) => ATOMIC_LINEBREAK.includes(dialect),
     asciiCaseOnly: (dialect) => ASCII_CASE_ONLY.includes(dialect),
     codeUnits: (dialect) => CODE_UNITS.includes(dialect),
     unicodeDigit: (dialect) => SETS.digit[dialect] !== ASCII_DIGIT,

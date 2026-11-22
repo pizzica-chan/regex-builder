@@ -31,7 +31,12 @@ function ours(c, lang) {
   } catch (e) {
     return e instanceof ctx.RegexTranslate.Untranslatable ? `試せない: ${e.message}` : 'E';
   }
-  const re = new RegExp(t.source, t.flags);
+  let re;
+  try {
+    re = new RegExp(t.source, t.flags);
+  } catch (e) {
+    return `置き換えた正規表現を JavaScript が受け付けない: ${e.message}`;
+  }
   const conv = toCp(c.s, 'utf16');
   return [...c.s.matchAll(re)].slice(0, 100).map((m) => [conv(m.index), conv(m.index + m[0].length)]);
 }
@@ -40,11 +45,17 @@ function ours(c, lang) {
 const KNOWN = {
   '(a)?\\1b': '一致しなかったグループの参照は、この言語では失敗するが、JavaScript では空文字列として一致する（試す欄で注意を出す）',
   '[[:alpha:]]+': 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている',
-  '[[:digit:]]+': '同上',
   '😀+': 'C# は絵文字などを 2 文字として数える（試す文字列に絵文字があると、試す欄で注意を出す）',
   '^.$': '同上',
 };
-const KNOWN_LANGS = { '[[:alpha:]]+': ['java'], '[[:digit:]]+': ['java'], '😀+': ['cs'], '^.$': ['cs'] };
+const KNOWN_LANGS = { '😀+': ['cs'], '^.$': ['cs'] };
+// [[:upper:]] なども、[[:alpha:]] と同じ
+for (const name of ['alpha', 'digit', 'upper', 'lower', 'alnum', 'word', 'punct', 'space', 'blank', 'cntrl', 'xdigit']) {
+  KNOWN[`[[:${name}:]]+`] = name === 'alpha'
+    ? 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている'
+    : '同上';
+  KNOWN_LANGS[`[[:${name}:]]+`] = ['java'];
+}
 const known = [];
 
 let total = 0;

@@ -362,7 +362,8 @@
     const addClass = (neg) => {
       const v = $('class-text').value;
       if (!v) return;
-      insertText(`[${neg ? '^' : ''}${v.replace(/]/g, '\\]')}]`);
+      // [ と ] と、先頭の ^ は文字として入れる。[ は Java などで入れ子の文字クラスになり、先頭の ^ は「以外」の意味になる
+      insertText(`[${neg ? '^' : ''}${v.replace(/[[\]]/g, '\\$&').replace(/^\^/, '\\^')}]`);
     };
     $('class-add').addEventListener('click', () => addClass(false));
     $('class-neg-add').addEventListener('click', () => addClass(true));
