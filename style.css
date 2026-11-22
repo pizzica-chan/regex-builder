@@ -133,7 +133,7 @@ button:hover { border-color: var(--accent); }
 /* 欄の配置。型は layout.js が CSS 変数で渡す */
 .board {
   display: grid;
-  grid-template-columns: var(--board-cols, 1fr 1fr);
+  grid-template-columns: var(--board-cols, minmax(0, 1fr) minmax(0, 1fr));
   grid-template-rows: var(--board-rows, auto);
   grid-template-areas: var(--board-areas, "pattern pattern" "palette meaning" "tester tester");
   align-items: start;

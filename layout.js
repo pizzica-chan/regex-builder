@@ -14,7 +14,7 @@
       id: 'standard',
       name: '標準',
       desc: '上に「正規表現」、中段に「部品」と「意味」を左右に並べ、下に「試す」',
-      cols: '1fr 1fr',
+      cols: 'minmax(0, 1fr) minmax(0, 1fr)',
       rows: 'auto auto auto',
       areas: [
         ['pattern', 'pattern'],
@@ -50,7 +50,7 @@
       id: 'test-focus',
       name: '試すを上に',
       desc: '上に「正規表現」、中段に「試す」と「意味」を左右に並べ、下に「部品」',
-      cols: '1fr 1fr',
+      cols: 'minmax(0, 1fr) minmax(0, 1fr)',
       rows: 'auto auto auto',
       areas: [
         ['pattern', 'pattern'],
@@ -62,7 +62,7 @@
       id: 'test-second',
       name: '試すを2段目に',
       desc: '上に「正規表現」、その下に「試す」、いちばん下に「部品」と「意味」を左右に並べる',
-      cols: '1fr 1fr',
+      cols: 'minmax(0, 1fr) minmax(0, 1fr)',
       rows: 'auto auto auto',
       areas: [
         ['pattern', 'pattern'],
@@ -74,7 +74,7 @@
       id: 'single',
       name: '縦一列',
       desc: '「正規表現」・「部品」・「意味」・「試す」を縦一列に並べる',
-      cols: '1fr',
+      cols: 'minmax(0, 1fr)',
       rows: 'auto auto auto auto',
       areas: [['pattern'], ['palette'], ['meaning'], ['tester']],
     },

@@ -14,6 +14,21 @@
 
   // ---------- 構文解析 ----------
 
+  // u フラグがないときの古い 8進数の書き方を読む。0〜3 で始まれば 3 桁まで、4〜7 なら 2 桁まで
+  function readLegacyOctal(digits) {
+    const max = /[0-3]/.test(digits[0]) ? 3 : 2;
+    let len = 0;
+    while (len < max && /[0-7]/.test(digits[len] || '')) len++;
+    return { ch: String.fromCharCode(parseInt(digits.slice(0, len), 8)), len };
+  }
+
+  // グループの数を超える \N（u フラグなし）を、JavaScript と同じく文字として読む。\8 \9 は数字そのもの
+  function legacyBackrefText(raw) {
+    if (/^[89]/.test(raw)) return raw;
+    const { ch, len } = readLegacyOctal(raw);
+    return ch + raw.slice(len);
+  }
+
   function parse(src, flags) {
     let i = 0;
     let groupCount = 0;
@@ -165,7 +180,7 @@
       if (/[1-9]/.test(c)) {
         const m = /^\d+/.exec(src.slice(i));
         i += m[0].length;
-        return { type: 'backref', index: Number(m[0]), start, end: i };
+        return { type: 'backref', index: Number(m[0]), raw: m[0], start, end: i };
       }
       if (c === 'k' && (unicode || hasNamedGroups)) {
         const m = /^k<([^>]+)>/.exec(src.slice(i));
@@ -176,20 +191,25 @@
           return ref;
         }
       }
-      return parseCommonEscape(start);
+      return parseCommonEscape(start, false);
     }
 
-    // 文字クラスの中でも外でも同じ意味になるエスケープ
-    function parseCommonEscape(start) {
+    // 文字クラスの中でも外でも、ほぼ同じ意味になるエスケープ。違うところは inClass で分ける
+    function parseCommonEscape(start, inClass) {
       const c = src[i];
       const rest = src.slice(i);
       const sets = { d: 'digit', D: 'nondigit', w: 'word', W: 'nonword', s: 'space', S: 'nonspace' };
       if (sets[c]) { i++; return { type: 'set', kind: sets[c], start, end: i }; }
       const ctrl = { n: '\n', r: '\r', t: '\t', f: '\f', v: '\v' };
       if (ctrl[c]) { i++; return { type: 'char', value: ctrl[c], start, end: i }; }
-      if (c === '0' && !/[0-9]/.test(src[i + 1] || '')) {
+      if (unicode && c === '0' && !/[0-9]/.test(src[i + 1] || '')) {
         i++;
         return { type: 'char', value: '\0', start, end: i };
+      }
+      if (!unicode && (c === '0' || (inClass && /[1-7]/.test(c)))) {
+        const { ch, len } = readLegacyOctal(src.slice(i));
+        i += len;
+        return { type: 'char', value: ch, start, end: i };
       }
       let m;
       if (c === 'x' && (m = /^x([0-9a-fA-F]{2})/.exec(rest))) {
@@ -209,6 +229,13 @@
       if (c === 'c' && (m = /^c([A-Za-z])/.exec(rest))) {
         i += m[0].length;
         return { type: 'char', value: String.fromCharCode(m[1].charCodeAt(0) % 32), start, end: i };
+      }
+      if (c === 'c' && !unicode) {
+        if (inClass && (m = /^c([0-9_])/.exec(rest))) {
+          i += m[0].length;
+          return { type: 'char', value: String.fromCharCode(m[1].charCodeAt(0) % 32), start, end: i };
+        }
+        return { type: 'char', value: '\\', start, end: i }; // i は c の位置のまま
       }
       if ((c === 'p' || c === 'P') && unicode && (m = /^[pP]\{([^}]+)\}/.exec(rest))) {
         i += m[0].length;
@@ -249,7 +276,7 @@
         i++;
         if (i >= src.length) err('最後の「\\」のあとに文字がありません', start);
         if (src[i] === 'b') { i++; return { type: 'char', value: '\b', start, end: i }; }
-        return parseCommonEscape(start);
+        return parseCommonEscape(start, true);
       }
       return { type: 'char', value: readChar(), start, end: i };
     }
@@ -448,7 +475,7 @@
       // u フラグがないと、JavaScript はこれをグループの参照ではなく、8進数の文字コードか数字そのものとして読む
       return ctx.flags.includes('u')
         ? `グループ${node.index}と同じ文字列（ただし、グループ${node.index}はありません）`
-        : `グループ${node.index}はないので、グループの参照ではなく、8進数の文字コードの文字か、数字そのものとして扱われる`;
+        : `${stringHtml(legacyBackrefText(node.raw))} という文字列（グループ${node.index}はないので、\\${node.raw} はグループの参照ではなく、8進数の文字コードや数字として読まれる）`;
     }
     return `グループ${node.index}と同じ文字列（そこで一致した内容がもう一度現れる）`;
   }
@@ -629,7 +656,7 @@
       case 'anchor': return pos(anchorName(node, ctx));
       case 'backref':
         if (node.name != null) return `グループ「${esc(node.name)}」と同じ文字列`;
-        if (node.index > ctx.groupCount && !ctx.flags.includes('u')) return `\\${node.index}（8進数の文字コードか数字）`;
+        if (node.index > ctx.groupCount && !ctx.flags.includes('u')) return stringHtml(legacyBackrefText(node.raw));
         return `グループ${node.index}と同じ文字列`;
       case 'seq':
         return node.items.length ? node.items.map((n) => short(n, ctx)).join(` ${ARROW} `) : '何もない';
