@@ -152,7 +152,6 @@ button:hover { border-color: var(--accent); }
     grid-template-rows: none;
     grid-template-areas: "pattern" "palette" "meaning" "tester";
   }
-  .layout-bar { display: none; }
 }
 
 .layout-bar {
@@ -198,6 +197,11 @@ button:hover { border-color: var(--accent); }
   background: var(--surface);
   color: var(--accent);
   outline: 1px solid var(--accent);
+}
+
+/* 幅が狭い画面では縦一列になるので、配置の選択欄は出さない。.layout-bar の指定よりあとに置く */
+@media (max-width: 820px) {
+  .layout-bar { display: none; }
 }
 
 .card-head { margin-bottom: 8px; }

@@ -21,8 +21,9 @@
 
     const err = (msg, pos = i) => { throw new RegexParseError(msg, pos); };
 
+    // u フラグがないと、JavaScript は絵文字などを 2 つの単位（サロゲート）に分けて扱う。それに合わせて読む
     function readChar() {
-      const ch = String.fromCodePoint(src.codePointAt(i));
+      const ch = unicode ? String.fromCodePoint(src.codePointAt(i)) : src[i];
       i += ch.length;
       return ch;
     }
@@ -276,7 +277,11 @@
   function charName(ch) {
     if (CHAR_NAMES[ch]) return CHAR_NAMES[ch];
     const cp = ch.codePointAt(0);
-    if (cp < 0x20 || cp === 0x7f) return `制御文字 U+${cp.toString(16).toUpperCase().padStart(4, '0')}`;
+    const hex = cp.toString(16).toUpperCase().padStart(4, '0');
+    if (cp < 0x20 || cp === 0x7f) return `制御文字 U+${hex}`;
+    if (ch.length === 1 && cp >= 0xd800 && cp <= 0xdfff) {
+      return `絵文字などの片割れ U+${hex}（u フラグがないと、1文字が2つに分かれる）`;
+    }
     return null;
   }
 
@@ -448,6 +453,7 @@
 
   // 回数のあとに添える補足。0 回を許すときと、最短一致のとき
   function quantNote(node, withOptional = true) {
+    if (node.max === 0) return '（0回なので、何もないのと同じ）';
     const notes = [];
     if (withOptional && node.min === 0) notes.push('なくてもよい');
     if (node.lazy) notes.push('できるだけ短く');
@@ -459,6 +465,15 @@
     m: '^ と $ を各行の先頭と末尾にする',
     s: '. を改行にも一致させる',
   };
+
+  // (?i:...) や (?-s:...) の中で使うフラグ
+  function innerCtx(node, ctx) {
+    if (node.kind !== 'modifier') return ctx;
+    let flags = ctx.flags;
+    for (const f of node.modOff) flags = flags.replace(f, '');
+    for (const f of node.modOn) if (!flags.includes(f)) flags += f;
+    return { ...ctx, flags };
+  }
 
   const LOOK_NOTE = '（確かめるだけで、一致した文字列には含めない）';
 
@@ -532,7 +547,7 @@
         return {
           ...base,
           html: groupLabel(node),
-          children: bodyChildren(node.body, ctx),
+          children: bodyChildren(node.body, innerCtx(node, ctx)),
           listType: 'steps',
         };
       case 'quant':
@@ -612,7 +627,8 @@
         return `［${altChain(node, ctx)}］`;
       case 'group': {
         // 中身が「または」だけなら、括弧を二重にしない
-        const inner = node.body.type === 'alt' ? altChain(node.body, ctx) : short(node.body, ctx);
+        const ictx = innerCtx(node, ctx);
+        const inner = node.body.type === 'alt' ? altChain(node.body, ictx) : short(node.body, ictx);
         switch (node.kind) {
           case 'capture': return `［グループ${node.index}: ${inner}］`;
           case 'named': return `［${esc(node.name)}: ${inner}］`;
@@ -679,7 +695,7 @@
     m: '^ と $ を、文字列全体ではなく各行の先頭と末尾として扱う',
     s: '. を改行にも一致させる',
     u: 'Unicode モードにする（\\p{…} などが使え、絵文字のような文字も1文字として数える）',
-    y: '前回の一致が終わった位置でだけ一致を調べる（その先は探さない）',
+    y: '調べ始める位置（最初は先頭、続けて調べるときは前回の一致の終わり）でだけ一致を調べ、その先は探さない',
     d: '一致した位置の詳しい情報を記録する',
   };
 
