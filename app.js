@@ -8,17 +8,28 @@
   const testEl = $('test-input');
   const flagBoxes = [...document.querySelectorAll('.flags input[type="checkbox"]')];
 
+  // 対象の言語（dialects.js の id）。JavaScript 以外は、translate.js で JavaScript に置き換えて動かす
+  const Dialects = window.RegexDialects;
+  const Translate = window.RegexTranslate;
+  const DIALECT_KEY = 'regex-builder:dialect';
+  let dialect = 'js';
+  const isJs = () => dialect === 'js';
+
   // desc: 部品の説明。ex: [例のパターン, 例の文字列]。例の一致は表示のたびに実際に計算する
   const PALETTE = [
     {
       title: '文字の種類（1文字）',
       items: [
-        { label: '数字', insert: '\\d', desc: '0〜9 の数字1文字に一致します。全角数字（０〜９）には一致しません。', ex: ['\\d+', '部屋は 302 号室、内線は ３０２'] },
-        { label: '数字以外', insert: '\\D', desc: '数字（0〜9）以外の1文字に一致します。英字や記号、空白、全角数字にも一致します。', ex: ['\\D+', 'A12-34b'] },
-        { label: '英数字と _', insert: '\\w', desc: '英字（a〜z、A〜Z）、数字（0〜9）、アンダースコア（_）のどれか1文字に一致します。ひらがなや漢字、全角の英数字には一致しません。', ex: ['\\w+', 'user_01 さん@host'] },
-        { label: '空白', insert: '\\s', desc: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースにも一致します。', ex: ['\\s+', 'a b　c'] },
+        { label: '数字', insert: '\\d', desc: '0〜9 の数字1文字に一致します。全角数字（０〜９）には一致しません。', ex: ['\\d+', '部屋は 302 号室、内線は ３０２'], descBy: { 'python php cs sakura': '数字1文字に一致します。全角数字（０〜９）やほかの言語の数字にも一致します。0〜9 だけにしたいときは [0-9] と書きます。' } },
+        { label: '数字以外', insert: '\\D', desc: '数字（0〜9）以外の1文字に一致します。英字や記号、空白、全角数字にも一致します。', ex: ['\\D+', 'A12-34b'], descBy: { 'python php cs sakura': '数字以外の1文字に一致します。全角数字なども数字とみなすので、一致しません。' } },
+        { label: '英数字と _', insert: '\\w', desc: '英字（a〜z、A〜Z）、数字（0〜9）、アンダースコア（_）のどれか1文字に一致します。ひらがなや漢字、全角の英数字には一致しません。', ex: ['\\w+', 'user_01 さん@host'], labelBy: { 'python php cs sakura': '文字・数字と _' }, descBy: { 'python php cs sakura': '文字・数字・アンダースコア（_）のどれか1文字に一致します。ひらがな・カタカナ・漢字・全角の英数字にも一致します。英数字と _ だけにしたいときは [A-Za-z0-9_] と書きます。' } },
+        { label: '空白', insert: '\\s', desc: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースにも一致します。', ex: ['\\s+', 'a b　c'], descBy: { java: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースには一致しません。', go: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースと垂直タブには一致しません。' } },
         { label: '空白以外', insert: '\\S', desc: '空白（スペース、タブ、改行など）以外の1文字に一致します。', ex: ['\\S+', 'hello world'] },
-        { label: '任意の文字', insert: '.', desc: '改行以外の、どんな文字でも1文字に一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。', ex: ['a.c', 'abc a-c ac'] },
+        { label: '任意の文字', insert: '.', desc: '改行以外の、どんな文字でも1文字に一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。', ex: ['a.c', 'abc a-c ac'], descBy: {
+          'python php cs go': '改行（LF）以外の、どんな文字でも1文字に一致します。CR（\\r）には一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。',
+          java: '改行（LF、CR など）以外の、どんな文字でも1文字に一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。',
+          sakura: '改行（CR と LF）以外の、どんな文字でも1文字に一致します。サクラエディタでは、s フラグを付けても改行には一致しません。記号の「.」そのものに一致させたいときは \\. と書きます。',
+        } },
         { label: '英小文字', insert: '[a-z]', desc: 'a から z までの英小文字1文字に一致します。i フラグを付けると大文字にも一致します。', ex: ['[a-z]+', 'Hello World'] },
         { label: '英大文字', insert: '[A-Z]', desc: 'A から Z までの英大文字1文字に一致します。', ex: ['[A-Z]', 'Hello World'] },
         { label: '英字', insert: '[A-Za-z]', desc: '英字（大文字と小文字）1文字に一致します。数字には一致しません。', ex: ['[A-Za-z]+', 'abc123DEF'] },
@@ -33,30 +44,38 @@
         { label: '0回以上', insert: '*', desc: '直前の部品を0回以上繰り返します。1回もないときにも一致します。', ex: ['ab*c', 'ac abc abbbc'] },
         { label: '1回以上', insert: '+', desc: '直前の部品を1回以上繰り返します。', ex: ['ab+c', 'ac abc abbbc'] },
         { label: 'なくてもよい', insert: '?', desc: '直前の部品が1回あっても、なくても一致します。', ex: ['colou?r', 'color colour'] },
+        { label: '戻らない繰り返し', insert: '+', only: 'python java php sakura', desc: '*、+、?、{…} のすぐ後ろに付けると、一度一致した繰り返しを戻って試し直しません（強欲な繰り返し）。', ex: ['"[^"]*+"', 'say "hi" and "yo"'] },
         { label: '最短で一致', insert: '?', desc: '*、+、?、{…} のすぐ後ろに付けると、繰り返しをできるだけ短いところで止めます。付けないと、できるだけ長く一致します。', ex: ['<.+?>', '<b>太字</b>'] },
       ],
     },
     {
       title: '位置',
       items: [
-        { label: '先頭', insert: '^', desc: '文字列の先頭に一致します。m フラグを付けると、各行の先頭にも一致します。文字ではなく位置に一致するので、一致した文字列には何も加わりません。', ex: ['^\\d+', '123 abc 456'] },
-        { label: '末尾', insert: '$', desc: '文字列の末尾に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。', ex: ['\\d+$', '123 abc 456'] },
-        { label: '単語の区切り', insert: '\\b', desc: '英数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。文字ではなく位置に一致します。日本語の単語の区切りには使えません。', ex: ['\\bcat\\b', 'cat concat cat_s cat.'] },
+        { label: '先頭', insert: '^', desc: '文字列の先頭に一致します。m フラグを付けると、各行の先頭にも一致します。文字ではなく位置に一致するので、一致した文字列には何も加わりません。', ex: ['^\\d+', '123 abc 456'], descBy: { sakura: '行の先頭に一致します。サクラエディタでは、各行の先頭と末尾に一致する設定（m）が常に有効です。文字ではなく位置に一致するので、一致した文字列には何も加わりません。' } },
+        { label: '末尾', insert: '$', desc: '文字列の末尾に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。', ex: ['\\d+$', '123 abc 456'], descBy: {
+          'python php cs': '文字列の末尾と、文字列の最後の改行（LF）の直前に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。',
+          java: '文字列の末尾と、文字列の最後の改行の直前に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。',
+          sakura: '行の末尾に一致します。サクラエディタでは、各行の先頭と末尾に一致する設定（m）が常に有効です。文字ではなく位置に一致します。',
+        } },
+        { label: '単語の区切り', insert: '\\b', desc: '英数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。文字ではなく位置に一致します。日本語の単語の区切りには使えません。', ex: ['\\bcat\\b', 'cat concat cat_s cat.'], descBy: { 'python php cs sakura': '文字・数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。ひらがなや漢字も単語の文字とみなします。文字ではなく位置に一致します。' } },
+        { label: '文字列の先頭', insert: '\\A', except: 'js', desc: '文字列全体の先頭だけに一致します。m フラグを付けても、各行の先頭には一致しません。', ex: ['\\A\\d+', '123 abc 456'] },
+        { label: '文字列の末尾', insert: '\\z', insertBy: { python: '\\Z' }, except: 'js', desc: '文字列全体の末尾だけに一致します。最後の改行の直前には一致しません。m フラグを付けても、各行の末尾には一致しません。', ex: ['\\d+\\z', '123 abc 456'], exBy: { python: ['\\d+\\Z', '123 abc 456'] } },
       ],
     },
     {
       title: 'グループと選択',
       items: [
         { label: 'グループ', wrap: ['(', ')'], desc: '囲んだ部分をひとまとめにし、一致した内容を番号で取り出せるようにします。\\1 と書くと、1番のグループと同じ内容にもう一度一致します。', ex: ['(ab)+', 'ababab abx'] },
-        { label: '名前付きグループ', wrap: ['(?<name>', ')'], desc: 'グループに名前を付けます。一致した内容を、番号の代わりに名前で取り出せます。name の部分を好きな名前に書き換えてください。', ex: ['(?<year>\\d{4})年', '2026年11月'] },
+        { label: '名前付きグループ', wrap: ['(?<name>', ')'], desc: 'グループに名前を付けます。一致した内容を、番号の代わりに名前で取り出せます。name の部分を好きな名前に書き換えてください。', ex: ['(?<year>\\d{4})年', '2026年11月'], wrapBy: { python: ['(?P<name>', ')'] }, exBy: { python: ['(?P<year>\\d{4})年', '2026年11月'] } },
         { label: 'まとめるだけ', wrap: ['(?:', ')'], desc: '囲んだ部分をひとまとめにします。グループと違い、一致した内容は記録しません。繰り返しや「または」の範囲を決めるときに使います。', ex: ['(?:ab)+', 'ababab abx'] },
+        { label: '戻らないまとまり', wrap: ['(?>', ')'], only: 'python java php cs sakura', desc: '囲んだ部分が一度一致したら、あとで失敗しても、その部分を戻って試し直しません（アトミックグループ）。試し直しが減るので、処理が速くなることがあります。', ex: ['(?>\\d+)円', '100円 100ドル'] },
         { label: 'または', insert: '|', desc: '左右のどちらかに一致します。( ) の中で使うと、その ( ) の中だけで「どちらか」になります。', ex: ['cat|dog', 'cat and dog'] },
-        { label: '同じ文字列（番号）', insert: '\\1', select: [1, 2], desc: '1番のグループに一致した文字列と同じものに一致します（後方参照）。グループのパターンではなく、実際に一致した文字列を使います。数字の部分を、参照したいグループの番号に書き換えてください。', ex: ['\\b(\\w+)\\s+\\1\\b', 'this is is a test'] },
-        { label: '同じ文字列（名前）', insert: '\\k<name>', select: [3, 7], desc: '名前付きグループに一致した文字列と同じものに一致します（後方参照）。name の部分を、参照したいグループの名前に書き換えてください。', ex: ['(?<q>["\'])(.*?)\\k<q>', 'say "hi" and \'yo"'] },
-        { label: '後ろに続く', wrap: ['(?=', ')'], desc: 'すぐ後ろに、囲んだ内容が続く位置に一致します。続く部分は確かめるだけで、一致した文字列には含めません。', ex: ['\\d+(?=円)', '100円 200ドル'] },
-        { label: '後ろに続かない', wrap: ['(?!', ')'], desc: 'すぐ後ろに、囲んだ内容が続かない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['foo(?!bar)', 'foobar foobaz'] },
-        { label: '前にある', wrap: ['(?<=', ')'], desc: 'すぐ前に、囲んだ内容がある位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<=¥)\\d+', '¥500 と 300円'] },
-        { label: '前にない', wrap: ['(?<!', ')'], desc: 'すぐ前に、囲んだ内容がない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<!¥)\\b\\d+', '¥500 と 300円'] },
+        { label: '同じ文字列（番号）', except: 'go', insert: '\\1', select: [1, 2], desc: '1番のグループに一致した文字列と同じものに一致します（後方参照）。グループのパターンではなく、実際に一致した文字列を使います。数字の部分を、参照したいグループの番号に書き換えてください。', ex: ['\\b(\\w+)\\s+\\1\\b', 'this is is a test'] },
+        { label: '同じ文字列（名前）', insert: '\\k<name>', select: [3, 7], desc: '名前付きグループに一致した文字列と同じものに一致します（後方参照）。name の部分を、参照したいグループの名前に書き換えてください。', ex: ['(?<q>["\'])(.*?)\\k<q>', 'say "hi" and \'yo"'], except: 'go', insertBy: { python: '(?P=name)' }, selectBy: { python: [4, 8] }, exBy: { python: ['(?P<q>["\'])(.*?)(?P=q)', 'say "hi" and \'yo"'] } },
+        { label: '後ろに続く', except: 'go', wrap: ['(?=', ')'], desc: 'すぐ後ろに、囲んだ内容が続く位置に一致します。続く部分は確かめるだけで、一致した文字列には含めません。', ex: ['\\d+(?=円)', '100円 200ドル'] },
+        { label: '後ろに続かない', except: 'go', wrap: ['(?!', ')'], desc: 'すぐ後ろに、囲んだ内容が続かない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['foo(?!bar)', 'foobar foobaz'] },
+        { label: '前にある', except: 'go', wrap: ['(?<=', ')'], desc: 'すぐ前に、囲んだ内容がある位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<=¥)\\d+', '¥500 と 300円'] },
+        { label: '前にない', except: 'go', wrap: ['(?<!', ')'], desc: 'すぐ前に、囲んだ内容がない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<!¥)\\b\\d+', '¥500 と 300円'] },
       ],
     },
   ];
@@ -90,7 +109,7 @@
     { name: '郵便番号（123-4567）', pattern: '^\\d{3}-\\d{4}$', flags: 'gm', test: '123-4567\n1234567\n12-34567\n100-0001' },
     { name: '携帯電話の番号', pattern: '^0[789]0-?\\d{4}-?\\d{4}$', flags: 'gm', test: '090-1234-5678\n08012345678\n03-1234-5678' },
     { name: 'メールアドレス（簡易）', pattern: '^[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+$', flags: 'gm', test: 'user@example.com\nfoo.bar+tag@mail.example.co.jp\nnot-an-email\n@example.com' },
-    { name: '日付（YYYY-MM-DD）', pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\\d|3[01])', flags: 'g', test: '締め切りは 2026-11-30、開始は 2026-12-01 です。2026-13-01 は月が正しくありません。' },
+    { name: '日付（YYYY-MM-DD）', pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\\d|3[01])', patternBy: { python: '(?P<year>\\d{4})-(?P<month>0[1-9]|1[0-2])-(?P<day>0[1-9]|[12]\\d|3[01])' }, flags: 'g', test: '締め切りは 2026-11-30、開始は 2026-12-01 です。2026-13-01 は月が正しくありません。' },
     { name: 'URL（http と https）', pattern: 'https?://[\\w.-]+(?:/[\\w\\-./?%&=#~]*)?', flags: 'g', test: '詳しくは https://example.com/docs?page=2 を見てください。http://localhost:8080/ も使えます。' },
     { name: 'ひらがなだけの行', pattern: '^[ぁ-んー]+$', flags: 'gm', test: 'ひらがな\nカタカナ\nまぜまぜカナ\nらーめん' },
     { name: 'HTML のタグ（最短一致）', pattern: '<.+?>', flags: 'g', test: '<p>こんにちは <strong>世界</strong></p>' },
@@ -100,15 +119,38 @@
 
   // ---------- 部品の表示 ----------
 
+  // 言語ごとに違う値。〜By の鍵は、空白で区切った言語の id（'python php'）
+  function forDialect(item, field) {
+    const by = item[`${field}By`];
+    if (by) {
+      for (const [k, v] of Object.entries(by)) if (k.split(' ').includes(dialect)) return v;
+    }
+    return item[field];
+  }
+  const availableIn = (item) => (!item.only || item.only.split(' ').includes(dialect)) &&
+    (!item.except || !item.except.split(' ').includes(dialect));
+  const resolveItem = (item) => ({
+    ...item,
+    label: forDialect(item, 'label'),
+    desc: forDialect(item, 'desc'),
+    ex: forDialect(item, 'ex'),
+    insert: forDialect(item, 'insert'),
+    wrap: forDialect(item, 'wrap'),
+    select: forDialect(item, 'select'),
+  });
+
   function buildPalette() {
     const root = $('palette');
+    root.innerHTML = '';
     for (const group of PALETTE) {
       const box = document.createElement('div');
       box.className = 'palette-group';
       box.innerHTML = `<h3>${esc(group.title)}</h3>`;
       const chips = document.createElement('div');
       chips.className = 'chips';
-      for (const item of group.items) {
+      for (const raw of group.items) {
+        if (!availableIn(raw)) continue;
+        const item = resolveItem(raw);
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'chip';
@@ -159,7 +201,16 @@
 
   // 例の文字列のうち、例のパターンに一致した部分に印を付ける。g も y も無いときは最初の一致だけを探す
   function exampleMatches(pattern, text, flags) {
-    const re = new RegExp(pattern, flags);
+    let re;
+    try {
+      if (isJs()) re = new RegExp(pattern, flags);
+      else {
+        const t = Translate.translate(pattern, flags, dialect);
+        re = new RegExp(t.source, t.flags);
+      }
+    } catch (_) {
+      return [];
+    }
     if (re.global) return [...text.matchAll(re)].filter((m) => m[0].length);
     const m = re.exec(text);
     return m && m[0].length ? [m] : [];
@@ -177,10 +228,17 @@
     return html + esc(text.slice(pos));
   }
 
+  // 例のパターンの見せ方。JavaScript は /…/flags、ほかの言語はパターンとフラグ
+  function patternLabel(pattern, flags) {
+    if (isJs()) return `/${esc(pattern)}/${flags}`;
+    const f = flags.replace('g', '');
+    return esc(pattern) + (f ? `（フラグ ${f}）` : '');
+  }
+
   function exampleBlock(label, pattern, text, flags, showCount) {
     const matches = exampleMatches(pattern, text, flags);
     const count = showCount ? `<span class="tip-count">${matches.length ? `${matches.length} 件` : '一致なし'}</span>` : '';
-    return `<div class="tip-ex"><span class="tip-ex-label">${label}</span><code>/${esc(pattern)}/${flags}</code>${count}</div>` +
+    return `<div class="tip-ex"><span class="tip-ex-label">${label}</span><code>${patternLabel(pattern, flags)}</code>${count}</div>` +
       `<div class="tip-sample">${exampleHtml(text, matches)}</div>`;
   }
 
@@ -195,7 +253,7 @@
     }
     if (item.lines) {
       const [pattern, lines] = item.lines;
-      html += `<div class="tip-ex"><span class="tip-ex-label">例</span><code>/${esc(pattern)}/</code></div>`;
+      html += `<div class="tip-ex"><span class="tip-ex-label">例</span><code>${patternLabel(pattern, '')}</code></div>`;
       html += '<div class="tip-sample tip-lines">' + lines.map((line) => {
         const matches = exampleMatches(pattern, line, '');
         return `<div><span>${exampleHtml(line, matches)}</span><span class="tip-count">${matches.length ? '一致する' : '一致しない'}</span></div>`;
@@ -281,8 +339,9 @@
     if (selected) {
       const pos = s + open.length + selected.length + close.length;
       patternEl.setSelectionRange(pos, pos);
-    } else if (open === '(?<name>') {
-      patternEl.setSelectionRange(s + 3, s + 7); // name を選んだ状態にする
+    } else if (open.includes('name')) {
+      const at = open.indexOf('name'); // name を選んだ状態にする
+      patternEl.setSelectionRange(s + at, s + at + 4);
     } else {
       patternEl.setSelectionRange(s + open.length, s + open.length);
     }
@@ -383,8 +442,9 @@
 
   // ---------- 表示の更新 ----------
 
+  // 今の言語で選べるフラグのうち、付いているもの
   function currentFlags() {
-    return flagBoxes.filter((b) => b.checked).map((b) => b.value).join('');
+    return flagBoxes.filter((b) => b.checked && !b.closest('label').hidden).map((b) => b.value).join('');
   }
 
   function showError(msg) {
@@ -440,7 +500,28 @@
     el.append(list);
   }
 
+  const PORTA_LABEL = { same: '同じ意味', differs: '意味が変わる', error: '書けない' };
+
+  function renderPortability(src, flags) {
+    const el = $('portability');
+    el.innerHTML = '';
+    if (!src) return;
+    let list;
+    try {
+      list = Translate.portability(src, flags, dialect);
+    } catch (_) {
+      return; // 今の言語で書き方に誤りがあるときは出さない
+    }
+    el.innerHTML = '<h3>ほかの言語で使うと</h3>' +
+      '<p class="hint">この正規表現を、ほかの言語でそのまま使ったときの違いです。</p><ul class="porta">' +
+      list.map((r) => `<li class="porta-${r.status}"><span class="porta-name">${esc(Dialects.get(r.dialect).name)}</span>` +
+        `<span class="porta-status">${PORTA_LABEL[r.status]}</span>` +
+        `${r.reasons.length ? `<span class="porta-why">${r.reasons.map(esc).join('。')}</span>` : ''}</li>`).join('') +
+      '</ul>';
+  }
+
   function renderMeaning(src, flags) {
+    renderPortability(src, flags);
     const tree = $('tree');
     const summary = $('summary');
     const flagEl = $('flag-explain');
@@ -453,7 +534,7 @@
     }
     let result;
     try {
-      result = explain(src, flags);
+      result = explain(src, flags, dialect);
     } catch (e) {
       const msg = e instanceof RegexParseError
         ? `説明を作れませんでした（${e.message}、${e.pos + 1}文字目）。`
@@ -496,7 +577,7 @@
   // ワーカーが使えないとき（file:// で開いたときなど）は、画面と同じスレッドで調べる。この場合は打ち切れない
   function findMatchesHere(re, text, lines) {
     try {
-      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines);
+      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines, lastMap);
     } catch (_) {
       return { matches: [], lineHits: null };
     }
@@ -561,7 +642,7 @@
         finishJob({ timeout: true });
       }, MATCH_TIMEOUT_MS);
       job = { id, re, text, lines, resolve, timer };
-      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines });
+      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines, groupMap: lastMap });
     });
   }
 
@@ -707,6 +788,7 @@
     let cls = '';
     if (badge.state === 'error') { text = '書き方に誤りがあります'; cls = 'ng'; }
     else if (badge.state === 'timeout') { text = '時間がかかるので打ち切りました'; cls = 'ng'; }
+    else if (badge.state === 'untestable') { text = '試す欄では動かせません'; cls = 'ng'; }
     else if (badge.state === 'done') {
       text = badge.count ? `${badge.count}${badge.count >= MAX_MATCHES ? '件以上' : '件'}の一致` : '一致なし';
       const score = lineModeEl.checked ? lineScore() : null;
@@ -724,7 +806,7 @@
     const nameOf = {};
     // 名前付きグループが何番かは一致の結果から分からないので、パターンを解析して調べる
     try {
-      const { ast } = window.RegexExplain.parse(patternEl.value, currentFlags());
+      const { ast } = window.RegexExplain.parse(patternEl.value, currentFlags(), dialect);
       (function walk(n) {
         if (!n || typeof n !== 'object') return;
         if (n.type === 'group' && n.kind === 'named') nameOf[n.index] = n.name;
@@ -798,12 +880,21 @@
     renderLines();
   }
 
+  // 試す欄で、JavaScript に置き換えて動かすときの注意
+  function renderNotes() {
+    const el = $('dialect-notes');
+    const notes = isJs() || !patternEl.value ? [] : [...translateNotes, ...Translate.textNotes(testEl.value, dialect)];
+    el.hidden = !notes.length;
+    el.innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
+  }
+
   async function renderMatches(re) {
     const text = testEl.value;
     if (!re || !text) cancelJob(); // 計算中の古い結果が、あとから表示を上書きしないようにする
+    renderNotes();
     if (!re) {
-      badge.state = patternEl.value ? 'error' : 'none';
-      clearMatches('');
+      badge.state = !patternEl.value ? 'none' : untestable ? 'untestable' : 'error';
+      clearMatches(untestable ? `試す欄では動かせません。${untestable}` : '');
       renderBadge();
       return;
     }
@@ -845,7 +936,7 @@
   // 自前の解析で誤りの場所が分かれば、日本語の説明と位置を返す。分からなければ null（ブラウザの英語の説明を使う）
   function japaneseError(src, flags) {
     try {
-      window.RegexExplain.parse(src, flags);
+      window.RegexExplain.parse(src, flags, dialect);
     } catch (e) {
       if (e instanceof RegexParseError) return { message: `${e.message}（${e.pos + 1}文字目）`, pos: e.pos };
     }
@@ -857,13 +948,17 @@
     const { parse, tokens } = window.RegexExplain;
     for (const tail of ['', ')', '))', ')))', ']', '])', ']))']) {
       try {
-        return tokens(parse(src + tail, flags).ast).filter(([s]) => s < src.length);
+        return tokens(parse(src + tail, flags, dialect).ast).filter(([s]) => s < src.length);
       } catch (_) { /* 次の補い方を試す */ }
     }
     return [];
   }
 
   let lastRe = null;
+  // JavaScript 以外の言語を置き換えて動かすときの、グループの番号の対応と注意。試せないときはその理由
+  let lastMap = null;
+  let translateNotes = [];
+  let untestable = '';
 
   function update() {
     const src = patternEl.value;
@@ -871,8 +966,13 @@
     $('flag-view').textContent = flags;
 
     lastRe = null;
+    lastMap = null;
+    translateNotes = [];
+    untestable = '';
     pv.errPos = null;
-    if (src) {
+    if (!src) {
+      showError('');
+    } else if (isJs()) {
       try {
         lastRe = new RegExp(src, flags);
         showError('');
@@ -882,7 +982,23 @@
         showError(`正規表現の書き方に誤りがあります。${ja ? ja.message : e.message}`);
       }
     } else {
-      showError('');
+      try {
+        const t = Translate.translate(src, flags, dialect);
+        lastRe = new RegExp(t.source, t.flags);
+        lastMap = t.groupMap;
+        translateNotes = t.notes;
+        showError('');
+      } catch (e) {
+        if (e instanceof RegexParseError) {
+          pv.errPos = e.pos;
+          showError(`正規表現の書き方に誤りがあります。${e.message}（${e.pos + 1}文字目）`);
+        } else if (e instanceof Translate.Untranslatable) {
+          untestable = e.message;
+          showError('');
+        } else {
+          showError(`試す欄で動かす形に置き換えられませんでした。${e.message}`);
+        }
+      }
     }
 
     pv.tokens = patternTokens(src, flags);
@@ -906,6 +1022,7 @@
     clearTimeout(hashTimer);
     hashTimer = setTimeout(() => {
       const p = new URLSearchParams();
+      if (!isJs()) p.set('d', dialect);
       if (src) p.set('p', src);
       if (flags) p.set('f', flags);
       const text = testEl.value;
@@ -925,6 +1042,7 @@
     if (!location.hash) return false;
     const p = new URLSearchParams(location.hash.slice(1));
     if (!p.has('p') && !p.has('t')) return false;
+    setDialect(p.get('d') || 'js', false);
     patternEl.value = p.get('p') || '';
     setFlags(p.get('f') ?? '');
     testEl.value = p.get('t') || '';
@@ -979,10 +1097,11 @@
 
   // 正規表現・フラグ・試す文字列をまとめて覚えておき、あとで戻す
   function snapshot() {
-    return { pattern: patternEl.value, flags: currentFlags(), test: testEl.value, lineMode: lineModeEl.checked };
+    return { dialect, pattern: patternEl.value, flags: currentFlags(), test: testEl.value, lineMode: lineModeEl.checked };
   }
 
   function restore(s) {
+    setDialect(s.dialect, false);
     setValue(testEl, s.test);
     setValue(patternEl, s.pattern);
     setFlags(s.flags);
@@ -990,28 +1109,91 @@
     update();
   }
 
-  function setupTools() {
+  // 例の一覧。今の言語で書けない例（Go の後読みなど）は出さない
+  function buildPresets() {
     const sel = $('preset');
+    sel.length = 1;
     PRESETS.forEach((p, n) => {
+      try {
+        window.RegexExplain.parse(forDialect(p, 'pattern'), p.flags, dialect);
+      } catch (_) {
+        return;
+      }
       const o = document.createElement('option');
       o.value = String(n);
       o.textContent = p.name;
       sel.append(o);
     });
+  }
+
+  // 言語を切り替える。save が true なら、次に開いたときのためにブラウザに覚えておく
+  function setDialect(id, save = true) {
+    dialect = Dialects.ids.includes(id) ? id : 'js';
+    $('dialect').value = dialect;
+    const allowed = Dialects.flags(dialect);
+    for (const b of flagBoxes) b.closest('label').hidden = !allowed.includes(b.value);
+    for (const el of document.querySelectorAll('.slash')) el.hidden = !isJs();
+    $('flag-view').hidden = !isJs();
+    const d = Dialects.get(dialect);
+    // 英字で終わる名前（「… の re」）のあとには空白を入れる
+    const engine = /[A-Za-z0-9)]$/.test(d.engine) ? `${d.engine} ` : d.engine;
+    $('dialect-engine').textContent = isJs()
+      ? `${engine}の書き方と意味に合わせています。`
+      : `${engine}の書き方と意味に合わせています。「試す」の欄では、同じ意味の JavaScript の正規表現に置き換えて動かします。`;
+    $('copy-literal').title = isJs() ? '/…/flags の形でコピー' : `${d.name}のコードの形でコピー`;
+    buildPalette();
+    buildPresets();
+    if (save) {
+      try { localStorage.setItem(DIALECT_KEY, dialect); } catch (_) { /* 保存できなくても切り替えは続ける */ }
+    }
+  }
+
+  function setupDialect() {
+    const sel = $('dialect');
+    for (const d of Dialects.LIST) {
+      const o = document.createElement('option');
+      o.value = d.id;
+      o.textContent = d.name;
+      sel.append(o);
+    }
+    sel.addEventListener('change', () => {
+      setDialect(sel.value);
+      update();
+    });
+    let saved = null;
+    try { saved = localStorage.getItem(DIALECT_KEY); } catch (_) { /* 保存できない環境では JavaScript で始める */ }
+    setDialect(saved || 'js', false);
+  }
+
+  function setupTools() {
+    const sel = $('preset');
+    buildPresets();
     sel.addEventListener('change', () => {
       const p = PRESETS[Number(sel.value)];
       sel.value = '';
       if (!p) return;
       const before = snapshot();
       setValue(testEl, p.test);
-      setValue(patternEl, p.pattern);
+      setValue(patternEl, forDialect(p, 'pattern'));
       setFlags(p.flags);
       update();
       toast(`例「${p.name}」を読み込みました`, () => restore(before));
     });
     $('copy-literal').addEventListener('click', () => {
-      if (!lastRe) { toast('正しい正規表現がありません'); return; }
-      copy(lastRe.toString(), `${lastRe.toString()} をコピーしました`);
+      if (isJs()) {
+        if (!lastRe) { toast('正しい正規表現がありません'); return; }
+        copy(lastRe.toString(), `${lastRe.toString()} をコピーしました`);
+        return;
+      }
+      const src = patternEl.value;
+      try {
+        window.RegexExplain.parse(src, currentFlags(), dialect);
+      } catch (_) {
+        toast('正しい正規表現がありません');
+        return;
+      }
+      const code = Dialects.codeSnippet(src, currentFlags().replace('g', ''), dialect);
+      copy(code, `${Dialects.get(dialect).name}の形でコピーしました: ${code}`);
     });
     $('copy-link').addEventListener('click', () => {
       saveToHash(patternEl.value, currentFlags());
@@ -1052,7 +1234,7 @@
     watchWidth(testEl);
   }
 
-  buildPalette();
+  setupDialect();
   setupPaletteToggle();
   setupCustomParts();
   setupLines();
@@ -1060,7 +1242,7 @@
   setupTools();
   if (!loadFromHash()) {
     const p = PRESETS[3];
-    patternEl.value = p.pattern;
+    patternEl.value = forDialect(p, 'pattern');
     setFlags(p.flags);
     testEl.value = p.test;
   }

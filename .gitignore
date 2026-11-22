@@ -1,2 +1,7 @@
 # Claude Code のプレビュー設定（ローカル用）
 .claude/
+# C# の調べ用のプログラムを作ったときにできるファイル
+tools/dialect-probe/cs/bin/
+tools/dialect-probe/cs/obj/
+tools/dialect-probe/cs-match/bin/
+tools/dialect-probe/cs-match/obj/

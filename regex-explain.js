@@ -29,28 +29,41 @@
     return ch + raw.slice(len);
   }
 
-  function parse(src, flags) {
+  // dialect は dialects.js の言語の id（js、python、java、php、cs、go、sakura）。言語ごとに受け付ける書き方を変える
+  function parse(src, flags, dialect = 'js') {
+    const D = global.RegexDialects;
+    if (!D || !D.ids.includes(dialect)) dialect = 'js';
+    const isJs = dialect === 'js';
+    const can = (feature) => !isJs && D.can(dialect, feature);
+    const dsub = D ? D.subject(dialect) : 'JavaScript ';
+
     let i = 0;
     let groupCount = 0;
-    const unicode = flags.includes('u') || flags.includes('v');
+    const unicode = isJs && (flags.includes('u') || flags.includes('v'));
+    // 絵文字などを 2 つの単位（UTF-16）に分けて読む言語。JavaScript は u フラグがないとき
+    const codeUnits = isJs ? !unicode : D.codeUnits(dialect);
     // u フラグがなく、名前付きグループが 1 つもないとき、JavaScript は \k を文字の k として扱う
     const hasNamedGroups = /\(\?<(?![=!])/.test(src);
     const groupNames = [];
     const namedRefs = [];
+    const numRefs = [];
+    const lookbehinds = [];
+    const groups = [];
 
     const err = (msg, pos = i) => { throw new RegexParseError(msg, pos); };
 
-    // u フラグがないと、JavaScript は絵文字などを 2 つの単位（サロゲート）に分けて扱う。それに合わせて読む
     function readChar() {
-      const ch = unicode ? String.fromCodePoint(src.codePointAt(i)) : src[i];
+      const ch = codeUnits ? src[i] : String.fromCodePoint(src.codePointAt(i));
       i += ch.length;
       return ch;
     }
 
+    // {n}、{n,}、{n,m}。Python は {,m}（0〜m 回）も量指定子として読む
     function readBraceQuant() {
-      const m = /^\{(\d+)(?:(,)(\d*))?\}/.exec(src.slice(i));
-      if (!m) return null;
-      const min = Number(m[1]);
+      const re = dialect === 'python' ? /^\{(\d*)(?:(,)(\d*))?\}/ : /^\{(\d+)(?:(,)(\d*))?\}/;
+      const m = re.exec(src.slice(i));
+      if (!m || (m[1] === '' && !m[2])) return null;
+      const min = m[1] === '' ? 0 : Number(m[1]);
       const max = m[2] ? (m[3] === '' ? Infinity : Number(m[3])) : min;
       return { min, max, len: m[0].length };
     }
@@ -108,8 +121,9 @@
       if (c === '*' || c === '+' || c === '?') {
         err(`「${c}」の前に、繰り返す対象がありません`);
       }
-      if (c === '{' && readBraceQuant()) {
-        err('「{…}」の前に、繰り返す対象がありません');
+      if (c === '{') {
+        if (readBraceQuant()) err('「{…}」の前に、繰り返す対象がありません');
+        if (dialect === 'java') err('Java では、{ を文字として使うときは \\{ と書きます');
       }
       return { type: 'char', value: readChar(), start, end: i };
     }
@@ -126,13 +140,39 @@
         const q = readBraceQuant();
         if (!q) return atom;
         ({ min, max } = q);
+        if (max < min) err('回数の指定 {n,m} で、m が n より小さくなっています', qStart);
         i += q.len;
       } else {
         return atom;
       }
+      if (atom.type === 'anchor' && !isJs && dialect !== 'sakura') err('位置を表す部品（^ や \\b など）は繰り返せません', qStart);
       let lazy = false;
+      let possessive = false;
       if (src[i] === '?') { lazy = true; i++; }
-      return { type: 'quant', min, max, lazy, target: atom, start: atom.start, qStart, end: i };
+      else if (src[i] === '+' && !isJs) {
+        if (can('possessive')) { possessive = true; i++; }
+        else if (dialect === 'cs') err('C# では *+ のような、戻って試し直さない繰り返し（強欲な繰り返し）は使えません');
+        else err(`${dsub}では、繰り返しの記号を重ねられません`);
+      }
+      const node = { type: 'quant', min, max, lazy, possessive, target: atom, start: atom.start, qStart, end: i };
+      // サクラエディタ（Onigmo）は a** のように繰り返しを重ねられる
+      if (can('nestedQuant') && /[*+?]/.test(src[i] || '')) return parseQuant(node);
+      if (can('nestedQuant') && src[i] === '{' && readBraceQuant()) return parseQuant(node);
+      return node;
+    }
+
+    function readGroupName(re, what) {
+      const m = re.exec(src.slice(i));
+      if (!m) err(`${what}の書き方が正しくありません`);
+      i += m[0].length;
+      return m[1];
+    }
+
+    function addNamed(name, start) {
+      if (groupNames.includes(name) && !isJs && !can('dupNames')) {
+        err(`「${name}」という名前のグループが2つあります`, start);
+      }
+      groupNames.push(name);
     }
 
     function parseGroup() {
@@ -143,31 +183,98 @@
       let modOn = '';
       let modOff = '';
       const rest = src.slice(i);
-      if (rest.startsWith('?:')) { kind = 'noncapture'; i += 2; }
-      else if (rest.startsWith('?=')) { kind = 'lookahead'; i += 2; }
-      else if (rest.startsWith('?!')) { kind = 'neglookahead'; i += 2; }
-      else if (rest.startsWith('?<=')) { kind = 'lookbehind'; i += 3; }
-      else if (rest.startsWith('?<!')) { kind = 'neglookbehind'; i += 3; }
-      else if (rest.startsWith('?<')) {
-        const m = /^\?<([^>]+)>/.exec(rest);
-        if (!m) err('グループ名の書き方が正しくありません');
-        kind = 'named';
-        name = m[1];
-        groupNames.push(name);
-        i += m[0].length;
+      if (isJs) {
+        if (rest.startsWith('?:')) { kind = 'noncapture'; i += 2; }
+        else if (rest.startsWith('?=')) { kind = 'lookahead'; i += 2; }
+        else if (rest.startsWith('?!')) { kind = 'neglookahead'; i += 2; }
+        else if (rest.startsWith('?<=')) { kind = 'lookbehind'; i += 3; }
+        else if (rest.startsWith('?<!')) { kind = 'neglookbehind'; i += 3; }
+        else if (rest.startsWith('?<')) {
+          const m = /^\?<([^>]+)>/.exec(rest);
+          if (!m) err('グループ名の書き方が正しくありません');
+          kind = 'named';
+          name = m[1];
+          groupNames.push(name);
+          i += m[0].length;
+        } else if (rest.startsWith('?')) {
+          const m = /^\?([ims]*)(?:-([ims]+))?:/.exec(rest);
+          if (!m) err('「(?」のあとの書き方が正しくありません');
+          kind = 'modifier';
+          modOn = m[1];
+          modOff = m[2] || '';
+          i += m[0].length;
+        }
       } else if (rest.startsWith('?')) {
-        const m = /^\?([ims]*)(?:-([ims]+))?:/.exec(rest);
-        if (!m) err('「(?」のあとの書き方が正しくありません');
-        kind = 'modifier';
-        modOn = m[1];
-        modOff = m[2] || '';
-        i += m[0].length;
+        const look = /^\?(?:[=!]|<[=!])/.exec(rest);
+        if (look) {
+          if (!can('lookahead')) err(`${dsub}では、先読みと後読み（(?=…) など）は使えません`, start);
+          kind = { '?=': 'lookahead', '?!': 'neglookahead', '?<=': 'lookbehind', '?<!': 'neglookbehind' }[look[0]];
+          i += look[0].length;
+        } else if (rest.startsWith('?P<')) {
+          if (!can('namedP')) err(`${dsub}では (?P<name>…) は使えません。(?<name>…) と書きます`, start);
+          i += 2;
+          name = readGroupName(/^<([A-Za-z_]\w*)>/, 'グループ名');
+          kind = 'named';
+          addNamed(name, start);
+        } else if (rest.startsWith('?P=')) {
+          if (!can('prefP')) err(`${dsub}では (?P=name) は使えません`, start);
+          i += 3;
+          const refName = readGroupName(/^([A-Za-z_]\w*)\)/, '(?P=name)');
+          const ref = { type: 'backref', name: refName, start, end: i };
+          namedRefs.push(ref);
+          return ref;
+        } else if (rest.startsWith("?'")) {
+          if (!can('namedQuote')) err(`${dsub}では (?'name'…) は使えません`, start);
+          i += 1;
+          name = readGroupName(/^'([A-Za-z_]\w*)'/, 'グループ名');
+          kind = 'named';
+          addNamed(name, start);
+        } else if (rest.startsWith('?<')) {
+          if (!can('namedAngle')) err('Python では、名前付きグループを (?P<name>…) と書きます', start);
+          i += 1;
+          name = readGroupName(/^<([A-Za-z_]\w*)>/, 'グループ名');
+          kind = 'named';
+          addNamed(name, start);
+        } else if (rest.startsWith('?>')) {
+          if (!can('atomic')) err(`${dsub}では (?>…)（アトミックグループ）は使えません`, start);
+          kind = 'atomic';
+          i += 2;
+        } else if (rest.startsWith('?#')) {
+          if (!can('comment')) err(`${dsub}では (?#…)（コメント）は使えません`, start);
+          const close = src.indexOf(')', i);
+          if (close < 0) err('「(」に対応する「)」がありません', start);
+          i = close + 1;
+          return { type: 'comment', start, end: i };
+        } else {
+          const m = /^\?([a-zA-Z]*)(?:-([a-zA-Z]*))?([:)])/.exec(rest);
+          if (!m) err('「(?」のあとの書き方が正しくありません');
+          const letters = m[1] + (m[2] || '');
+          const bad = [...letters].find((f) => !'ims'.includes(f));
+          if (bad === 'x') err('このツールは、x フラグ（空白を無視する書き方）には対応していません');
+          if (bad) err(`このツールは、(?${bad}) のフラグには対応していません（使えるのは i、m、s）`);
+          if (m[3] === ':') {
+            kind = 'modifier';
+            modOn = m[1];
+            modOff = m[2] || '';
+            i += m[0].length;
+          } else {
+            // (?i) のように範囲を区切らない書き方。書いた位置から、グループの終わりまで効く
+            if (!can('inlineFlags')) err(`${dsub}では (?i) のようなフラグの書き方は使えません`, start);
+            if (!can('inlineFlagsMiddle') && start !== 0) err(`${dsub}では、(?i) のようなフラグは正規表現の先頭にしか書けません`, start);
+            if (dialect === 'python' && m[2] !== undefined) err('Python では、先頭の (?i) の書き方でフラグを外す（-）ことはできません', start);
+            i += m[0].length;
+            return { type: 'flags', on: m[1], off: m[2] || '', start, end: i };
+          }
+        }
       }
       const index = kind === 'capture' || kind === 'named' ? ++groupCount : null;
       const body = parseAlt();
       if (src[i] !== ')') err('「(」に対応する「)」がありません', start);
       i++;
-      return { type: 'group', kind, name, index, modOn, modOff, body, start, end: i };
+      const node = { type: 'group', kind, name, index, modOn, modOff, body, start, end: i };
+      if (index) groups.push(node);
+      if (kind === 'lookbehind' || kind === 'neglookbehind') lookbehinds.push(node);
+      return node;
     }
 
     function parseAtomEscape() {
@@ -179,19 +286,67 @@
         i++;
         return { type: 'anchor', kind: c === 'b' ? 'wordb' : 'nonwordb', start, end: i };
       }
-      if (/[1-9]/.test(c)) {
-        const m = /^\d+/.exec(src.slice(i));
-        i += m[0].length;
-        return { type: 'backref', index: Number(m[0]), raw: m[0], start, end: i };
-      }
-      if (c === 'k' && (unicode || hasNamedGroups)) {
-        const m = /^k<([^>]+)>/.exec(src.slice(i));
-        if (m) {
+      if (isJs) {
+        if (/[1-9]/.test(c)) {
+          const m = /^\d+/.exec(src.slice(i));
           i += m[0].length;
-          const ref = { type: 'backref', name: m[1], start, end: i };
-          namedRefs.push(ref);
-          return ref;
+          return { type: 'backref', index: Number(m[0]), raw: m[0], start, end: i };
         }
+        if (c === 'k' && (unicode || hasNamedGroups)) {
+          const m = /^k<([^>]+)>/.exec(src.slice(i));
+          if (m) {
+            i += m[0].length;
+            const ref = { type: 'backref', name: m[1], start, end: i };
+            namedRefs.push(ref);
+            return ref;
+          }
+        }
+        return parseCommonEscape(start, false);
+      }
+      // ここから JavaScript 以外
+      const anchors = { A: ['anchorA', 'strStart'], z: ['anchorz', 'strEnd'], Z: ['anchorZ', 'strEndNl'] };
+      if (anchors[c]) {
+        const [feature, kind] = anchors[c];
+        if (!can(feature)) {
+          if (c === 'z' && dialect === 'python') err('Python 3.13 では \\z は使えません。文字列の末尾は \\Z と書きます', start);
+          err(`${dsub}では \\${c} は使えません`, start);
+        }
+        i++;
+        // Python の \Z は文字列の末尾だけ（ほかの言語の \z と同じ）
+        return { type: 'anchor', kind: c === 'Z' && dialect === 'python' ? 'strEnd' : kind, start, end: i };
+      }
+      if (c === 'G') err('このツールは \\G（探し始めた位置）には対応していません', start);
+      if (/[1-9]/.test(c)) {
+        if (!can('backref')) err(`${dsub}では、\\1 のような後方参照は使えません`, start);
+        const m = (dialect === 'python' ? /^\d{1,2}/ : /^\d+/).exec(src.slice(i));
+        i += m[0].length;
+        const ref = { type: 'backref', index: Number(m[0]), raw: m[0], start, end: i };
+        numRefs.push(ref);
+        return ref;
+      }
+      if (c === 'k' && src[i + 1] === '<') {
+        if (!can('krefAngle')) {
+          err(`${dsub}では \\k<name> は使えません${dialect === 'python' ? '。(?P=name) と書きます' : ''}`, start);
+        }
+        i++;
+        const refName = readGroupName(/^<([A-Za-z_]\w*)>/, '\\k<name>');
+        const ref = { type: 'backref', name: refName, start, end: i };
+        namedRefs.push(ref);
+        return ref;
+      }
+      if (c === 'Q') {
+        if (!can('quoteQE')) err(`${dsub}では \\Q…\\E は使えません`, start);
+        const close = src.indexOf('\\E', i + 1);
+        const end = close < 0 ? src.length : close;
+        const value = src.slice(i + 1, end);
+        i = close < 0 ? src.length : close + 2;
+        if (!value) return { type: 'comment', start, end: i };
+        return { type: 'literal', value, start, end: i, quoted: true, parts: [] };
+      }
+      if (c === 'R') {
+        if (!can('linebreakR')) err(`${dsub}では \\R は使えません`, start);
+        i++;
+        return { type: 'linebreak', start, end: i };
       }
       return parseCommonEscape(start, false);
     }
@@ -202,48 +357,121 @@
       const rest = src.slice(i);
       const sets = { d: 'digit', D: 'nondigit', w: 'word', W: 'nonword', s: 'space', S: 'nonspace' };
       if (sets[c]) { i++; return { type: 'set', kind: sets[c], start, end: i }; }
-      const ctrl = { n: '\n', r: '\r', t: '\t', f: '\f', v: '\v' };
-      if (ctrl[c]) { i++; return { type: 'char', value: ctrl[c], start, end: i }; }
-      if (unicode && c === '0' && !/[0-9]/.test(src[i + 1] || '')) {
+      if (!isJs && (c === 'h' || c === 'H') && can('hSpace')) {
         i++;
-        return { type: 'char', value: '\0', start, end: i };
+        return { type: 'set', kind: c === 'h' ? 'hspace' : 'nonhspace', start, end: i };
       }
-      if (!unicode && (c === '0' || (inClass && /[1-7]/.test(c)))) {
-        const { ch, len } = readLegacyOctal(src.slice(i));
-        i += len;
-        return { type: 'char', value: ch, start, end: i };
+      if (!isJs && (c === 'v' || c === 'V') && can('vSpace')) {
+        i++;
+        return { type: 'set', kind: c === 'v' ? 'vspace' : 'nonvspace', start, end: i };
       }
+      const ctrl = { n: '\n', r: '\r', t: '\t', f: '\f', v: '\v' };
+      if (!isJs) {
+        if (can('bell')) ctrl.a = '\x07';
+        if (can('escChar')) ctrl.e = '\x1b';
+      }
+      if (ctrl[c]) { i++; return { type: 'char', value: ctrl[c], start, end: i }; }
       let m;
-      if (c === 'x' && (m = /^x([0-9a-fA-F]{2})/.exec(rest))) {
-        i += m[0].length;
-        return { type: 'char', value: String.fromCharCode(parseInt(m[1], 16)), start, end: i };
-      }
-      if (c === 'u') {
-        if (unicode && (m = /^u\{([0-9a-fA-F]+)\}/.exec(rest))) {
-          i += m[0].length;
-          return { type: 'char', value: String.fromCodePoint(parseInt(m[1], 16)), start, end: i };
+      if (isJs) {
+        if (unicode && c === '0' && !/[0-9]/.test(src[i + 1] || '')) {
+          i++;
+          return { type: 'char', value: '\0', start, end: i };
         }
-        if ((m = /^u([0-9a-fA-F]{4})/.exec(rest))) {
+        if (!unicode && (c === '0' || (inClass && /[1-7]/.test(c)))) {
+          const { ch, len } = readLegacyOctal(src.slice(i));
+          i += len;
+          return { type: 'char', value: ch, start, end: i };
+        }
+        if (c === 'x' && (m = /^x([0-9a-fA-F]{2})/.exec(rest))) {
           i += m[0].length;
           return { type: 'char', value: String.fromCharCode(parseInt(m[1], 16)), start, end: i };
         }
-      }
-      if (c === 'c' && (m = /^c([A-Za-z])/.exec(rest))) {
-        i += m[0].length;
-        return { type: 'char', value: String.fromCharCode(m[1].charCodeAt(0) % 32), start, end: i };
-      }
-      if (c === 'c' && !unicode) {
-        if (inClass && (m = /^c([0-9_])/.exec(rest))) {
+        if (c === 'u') {
+          if (unicode && (m = /^u\{([0-9a-fA-F]+)\}/.exec(rest))) {
+            i += m[0].length;
+            return { type: 'char', value: String.fromCodePoint(parseInt(m[1], 16)), start, end: i };
+          }
+          if ((m = /^u([0-9a-fA-F]{4})/.exec(rest))) {
+            i += m[0].length;
+            return { type: 'char', value: String.fromCharCode(parseInt(m[1], 16)), start, end: i };
+          }
+        }
+        if (c === 'c' && (m = /^c([A-Za-z])/.exec(rest))) {
           i += m[0].length;
           return { type: 'char', value: String.fromCharCode(m[1].charCodeAt(0) % 32), start, end: i };
         }
-        return { type: 'char', value: '\\', start, end: i }; // i は c の位置のまま
+        if (c === 'c' && !unicode) {
+          if (inClass && (m = /^c([0-9_])/.exec(rest))) {
+            i += m[0].length;
+            return { type: 'char', value: String.fromCharCode(m[1].charCodeAt(0) % 32), start, end: i };
+          }
+          return { type: 'char', value: '\\', start, end: i }; // i は c の位置のまま
+        }
+        if ((c === 'p' || c === 'P') && unicode && (m = /^[pP]\{([^}]+)\}/.exec(rest))) {
+          i += m[0].length;
+          return { type: 'uprop', negate: c === 'P', value: m[1], start, end: i };
+        }
+        return { type: 'char', value: readChar(), start, end: i };
       }
-      if ((c === 'p' || c === 'P') && unicode && (m = /^[pP]\{([^}]+)\}/.exec(rest))) {
-        i += m[0].length;
-        return { type: 'uprop', negate: c === 'P', value: m[1], start, end: i };
+
+      // ここから JavaScript 以外
+      const charAt = (cp, len) => {
+        i += len;
+        if (cp > 0x10ffff) err('文字コードが大きすぎます', start);
+        return { type: 'char', value: String.fromCodePoint(cp), start, end: i };
+      };
+      if (c === '0' || (inClass && /[1-7]/.test(c))) {
+        if (!can('octal')) err(`${dsub}では \\0 や \\012 のような8進数の書き方は使えません。\\x{0} のように書きます`, start);
+        if (inClass && c !== '0' && dialect === 'java') err('Java では、文字クラスの中に \\1 のような書き方は使えません', start);
+        if (dialect === 'java') {
+          // Java は \0 のあとに 1〜3 桁の8進数が要る（3 桁のときは先頭が 0〜3）
+          if (!(m = /^0(?:[0-3][0-7]{2}|[0-7]{1,2})/.exec(rest))) err('Java では、\\0 のあとに8進数の数字が要ります（例: \\0101）', start);
+          return charAt(parseInt(m[0].slice(1), 8), m[0].length);
+        }
+        m = c === '0' ? /^0[0-7]{0,2}/.exec(rest) : /^[1-7][0-7]{0,2}/.exec(rest);
+        return charAt(parseInt(m[0], 8), m[0].length);
       }
-      return { type: 'char', value: readChar(), start, end: i };
+      if (c === 'x') {
+        if (rest[1] === '{') {
+          if (!can('xBrace') || !(m = /^x\{([0-9a-fA-F]+)\}/.exec(rest))) err(`${dsub}では \\x{…} は使えません`, start);
+          return charAt(parseInt(m[1], 16), m[0].length);
+        }
+        if ((m = /^x([0-9a-fA-F]{2})/.exec(rest))) {
+          if (!can('xHex2')) err(`${dsub}では \\x41 のような書き方は使えません。\\x{41} と書きます`, start);
+          return charAt(parseInt(m[1], 16), m[0].length);
+        }
+        err('\\x のあとに16進数の数字が要ります', start);
+      }
+      if (c === 'u' && (m = /^u([0-9a-fA-F]{4})/.exec(rest)) && can('uHex4')) return charAt(parseInt(m[1], 16), m[0].length);
+      if (c === 'u' && dialect !== 'sakura') err(`${dsub}では \\u0041 のような書き方は使えません${can('xBrace') ? '。\\x{41} と書きます' : ''}`, start);
+      if (c === 'c') {
+        if (!can('ctrlLetter') || !(m = /^c([A-Za-z])/.exec(rest))) err(`${dsub}では \\cA のような書き方は使えません`, start);
+        return charAt(m[1].toUpperCase().charCodeAt(0) ^ 0x40, m[0].length);
+      }
+      if (c === 'o' && rest[1] === '{') {
+        if (!can('oBrace') || !(m = /^o\{([0-7]+)\}/.exec(rest))) err(`${dsub}では \\o{…} は使えません`, start);
+        return charAt(parseInt(m[1], 8), m[0].length);
+      }
+      if (c === 'p' || c === 'P') {
+        if (!can('uprop')) err(`${dsub}では \\p{…} は使えません`, start);
+        if ((m = /^[pP]\{(\^?)([^}]+)\}/.exec(rest)) || (m = /^[pP]()([A-Za-z])/.exec(rest))) {
+          if (D.bareScriptInvalid(m[2], dialect)) {
+            err(dialect === 'java'
+              ? `Java では \\p{${m[2]}} は使えません。\\p{Is${m[2]}} と書きます`
+              : `C# では \\p{${m[2]}} は使えません。\\p{IsHiragana} のようなブロックの名前を使います`, start);
+          }
+          if (!D.propToJs(m[2], dialect)) {
+            err(`${dsub}では \\p{${m[2]}} という名前が使えないか、このツールが対応していない名前です`, start);
+          }
+          i += m[0].length;
+          return { type: 'uprop', negate: (c === 'P') !== (m[1] === '^'), value: m[2], start, end: i };
+        }
+        err('\\p のあとの書き方が正しくありません', start);
+      }
+      if (inClass && c === 'b' && (dialect === 'java' || dialect === 'go')) err(`${dsub}では、文字クラスの中に \\b は使えません`, start);
+      const ch = readChar();
+      if (/[A-Za-z0-9]/.test(ch) && !can('unknownLetterEscape')) err(`${dsub}では \\${ch} という書き方はありません`, start);
+      return { type: 'char', value: ch, start, end: i };
     }
 
     function parseClass() {
@@ -252,18 +480,39 @@
       let negate = false;
       if (src[i] === '^') { negate = true; i++; }
       const items = [];
-      while (i < src.length && src[i] !== ']') {
-        const a = parseClassAtom();
-        if (a.type === 'char' && src[i] === '-' && i + 1 < src.length && src[i + 1] !== ']') {
-          const dash = i;
-          i++;
-          const b = parseClassAtom();
-          if (b.type === 'char') {
-            items.push({ type: 'range', from: a.value, to: b.value, start: a.start, end: b.end });
-          } else {
-            items.push(a, { type: 'char', value: '-', start: dash, end: dash + 1 }, b);
-          }
+      // JavaScript 以外では、[ や [^ のすぐあとの ] は文字として読む
+      let first = !isJs;
+      while (i < src.length && (src[i] !== ']' || first)) {
+        first = false;
+        if (!isJs && src[i] === '[' && src[i + 1] === ':' && can('posix')) {
+          const m = /^\[:(\^?)([a-z]+):\]/.exec(src.slice(i));
+          if (!m) err('POSIX の文字クラス（[:alpha:] など）の書き方が正しくありません');
+          const pstart = i;
+          i += m[0].length;
+          items.push({ type: 'posix', name: m[2], negate: m[1] === '^', start: pstart, end: i });
           continue;
+        }
+        if (!isJs && can('classNested') && (src[i] === '[' || src.startsWith('&&', i))) {
+          err('このツールは、文字クラスの入れ子（[a[b]]）と && には対応していません');
+        }
+        const a = parseClassAtom();
+        if (src[i] === '-' && i + 1 < src.length && src[i + 1] !== ']') {
+          if (a.type === 'char') {
+            const dash = i;
+            i++;
+            const b = parseClassAtom();
+            if (b.type === 'char') {
+              if (!isJs && a.value.codePointAt(0) > b.value.codePointAt(0)) err('文字クラスの範囲の順番が逆です', a.start);
+              items.push({ type: 'range', from: a.value, to: b.value, start: a.start, end: b.end });
+            } else {
+              if (!isJs) err('文字クラスの範囲（a-z）の端に、\\d のような文字の集まりは使えません', b.start);
+              items.push(a, { type: 'char', value: '-', start: dash, end: dash + 1 }, b);
+            }
+            continue;
+          }
+          if (!isJs && dialect !== 'php' && dialect !== 'sakura') {
+            err('文字クラスの範囲（a-z）の端に、\\d のような文字の集まりは使えません', a.start);
+          }
         }
         items.push(a);
       }
@@ -277,7 +526,10 @@
       if (src[i] === '\\') {
         i++;
         if (i >= src.length) err('最後の「\\」のあとに文字がありません', start);
-        if (src[i] === 'b') { i++; return { type: 'char', value: '\b', start, end: i }; }
+        if (src[i] === 'b' && !(dialect === 'java' || dialect === 'go')) { i++; return { type: 'char', value: '\b', start, end: i }; }
+        if (!isJs && src[i] === 'Q' && can('quoteQE')) {
+          err('このツールは、文字クラスの中の \\Q…\\E には対応していません', start);
+        }
         return parseCommonEscape(start, true);
       }
       return { type: 'char', value: readChar(), start, end: i };
@@ -288,7 +540,78 @@
     for (const ref of namedRefs) {
       if (!groupNames.includes(ref.name)) err(`「${ref.name}」という名前のグループがありません`, ref.start);
     }
-    return { ast, groupCount };
+
+    // C# は、名前なしのグループに先に番号を付け、名前付きのグループはそのあとの番号にする。同じ名前のグループは同じ番号
+    if (dialect === 'cs') {
+      let n = 0;
+      for (const g of groups) if (g.kind === 'capture') g.index = ++n;
+      const byName = {};
+      for (const g of groups) {
+        if (g.kind !== 'named') continue;
+        if (!(g.name in byName)) byName[g.name] = ++n;
+        g.index = byName[g.name];
+      }
+      groupCount = n;
+    }
+    for (const ref of namedRefs) {
+      const g = groups.find((x) => x.name === ref.name);
+      if (g) ref.index = g.index;
+    }
+    for (const ref of numRefs) {
+      if (ref.index <= groupCount) continue;
+      // Java は、ないグループへの参照を誤りにしない（一致しないだけ）
+      if (dialect === 'java') { ref.missing = true; continue; }
+      err(`グループ${ref.index}はありません`, ref.start);
+    }
+
+    // 後読みの中身の長さを確かめる
+    const rule = isJs ? 'any' : D.lookbehind(dialect);
+    for (const lb of lookbehinds) checkLookbehind(lb, rule, dsub, err);
+
+    return { ast, groupCount, dialect };
+  }
+
+  // 部品が一致する長さの [最小, 最大]。最大が決まらないときは Infinity
+  function widthOf(n) {
+    switch (n.type) {
+      case 'char': case 'set': case 'class': case 'dot': case 'uprop': return [1, 1];
+      case 'literal': return [[...n.value].length, [...n.value].length];
+      case 'linebreak': return [1, 2];
+      case 'anchor': case 'comment': case 'flags': return [0, 0];
+      case 'backref': return [0, Infinity];
+      case 'seq': return n.items.map(widthOf).reduce(([a, b], [c, d]) => [a + c, b + d], [0, 0]);
+      case 'alt': {
+        const ws = n.alts.map(widthOf);
+        return [Math.min(...ws.map((w) => w[0])), Math.max(...ws.map((w) => w[1]))];
+      }
+      case 'group':
+        return /look/.test(n.kind) ? [0, 0] : widthOf(n.body);
+      case 'quant': {
+        const [a, b] = widthOf(n.target);
+        return [a * n.min, n.max === 0 ? 0 : b * n.max];
+      }
+      default: return [0, Infinity];
+    }
+  }
+
+  function checkLookbehind(lb, rule, dsub, err) {
+    if (rule === 'any') return;
+    const body = lb.body;
+    const top = body.type === 'alt' ? body.alts : [body];
+    if (rule === 'bounded') {
+      if (widthOf(body)[1] === Infinity) err(`${dsub}では、後読みの中に * や + のような上限のない繰り返しは使えません`, lb.start);
+      return;
+    }
+    if (rule === 'fixed') {
+      const ws = top.map(widthOf);
+      const fixed = ws.every(([a, b]) => a === b) && ws.every(([a]) => a === ws[0][0]);
+      if (!fixed) err(`${dsub}では、後読みの中身を決まった長さにする必要があります（* や {1,3}、長さの違う「または」は使えません）`, lb.start);
+      return;
+    }
+    // fixed-alt: 「または」の候補ごとに長さが決まっていればよい
+    if (!top.every((a) => { const [x, y] = widthOf(a); return x === y; })) {
+      err(`${dsub}では、後読みの中身を「または」の候補ごとに決まった長さにする必要があります`, lb.start);
+    }
   }
 
   // ---------- 説明文の生成 ----------
@@ -403,20 +726,75 @@
     'Script=Latin': 'ラテン文字',
   };
 
+  const isJsCtx = (ctx) => !ctx || !ctx.dialect || ctx.dialect === 'js';
+  const DL = () => global.RegexDialects;
+
+  // \d などの名詞。JavaScript は SET_NOUN のまま、ほかの言語は意味の違いを言葉にする
+  function setNoun(kind, ctx) {
+    if (isJsCtx(ctx)) return SET_NOUN[kind];
+    const d = ctx.dialect;
+    const uniDigit = DL().unicodeDigit(d);
+    const uniWord = DL().unicodeWord(d);
+    switch (kind) {
+      case 'digit': return uniDigit ? '数字（全角数字やほかの言語の数字も含む）' : SET_NOUN.digit;
+      case 'nondigit': return uniDigit ? '数字以外の文字（全角数字なども数字として除く）' : SET_NOUN.nondigit;
+      case 'word': return uniWord ? `文字・数字か ${UNDERSCORE}（ひらがなや漢字も含む）` : SET_NOUN.word;
+      case 'nonword': return uniWord ? `文字・数字と ${UNDERSCORE} 以外の文字` : SET_NOUN.nonword;
+      case 'space':
+        if (d === 'java') return '空白（半角スペース・タブ・改行など。全角スペースは含まない）';
+        if (d === 'go') return '空白（半角スペース・タブ・改行など。全角スペースと垂直タブは含まない）';
+        return '空白（スペース・タブ・改行・全角スペースなど）';
+      case 'nonspace': return SET_NOUN.nonspace;
+      case 'hspace': return '横方向の空白（スペース・タブ・全角スペースなど）';
+      case 'nonhspace': return '横方向の空白以外の文字';
+      case 'vspace': return '縦方向の空白（改行など）';
+      case 'nonvspace': return '縦方向の空白以外の文字';
+      default: return esc(kind);
+    }
+  }
+
+  // [...] の中で並べるときの名詞
+  function setItem(kind, ctx) {
+    if (isJsCtx(ctx)) return SET_ITEM[kind];
+    const d = ctx.dialect;
+    const uniDigit = DL().unicodeDigit(d);
+    const uniWord = DL().unicodeWord(d);
+    switch (kind) {
+      case 'digit': return uniDigit ? '数字（全角数字なども含む）' : SET_ITEM.digit;
+      case 'nondigit': return SET_ITEM.nondigit;
+      case 'word': return uniWord ? `文字・数字と ${UNDERSCORE}` : SET_ITEM.word;
+      case 'nonword': return uniWord ? `文字・数字と ${UNDERSCORE} 以外` : SET_ITEM.nonword;
+      case 'hspace': return '横方向の空白';
+      case 'nonhspace': return '横方向の空白以外';
+      case 'vspace': return '縦方向の空白';
+      case 'nonvspace': return '縦方向の空白以外';
+      default: return SET_ITEM[kind] || esc(kind);
+    }
+  }
+
+  const POSIX_NAMES = {
+    alpha: '英字', digit: '数字', alnum: '英数字', upper: '大文字', lower: '小文字', space: '空白', punct: '記号',
+    xdigit: '16進数の数字', word: '単語の文字', blank: 'スペースとタブ', cntrl: '制御文字', print: '表示できる文字', graph: '空白以外の表示できる文字',
+  };
+
   function upropNoun(node) {
     const key = node.value.replace(/^(?:sc|Script_Extensions|scx)=/, 'Script=');
     const base = UPROP_NAMES[key] || `Unicode の性質「${esc(node.value)}」を持つ文字`;
     return node.negate ? `${base}以外の文字` : base;
   }
 
-  function classItemHtml(it) {
+  function classItemHtml(it, ctx) {
     if (it.type === 'range') {
       const name = RANGE_NAMES[`${it.from}-${it.to}`];
       const range = `${charHtml(it.from)}〜${charHtml(it.to)}`;
       return name ? `${name}（${range}）` : range;
     }
-    if (it.type === 'set') return SET_ITEM[it.kind];
+    if (it.type === 'set') return setItem(it.kind, ctx);
     if (it.type === 'uprop') return upropNoun(it);
+    if (it.type === 'posix') {
+      const name = `${POSIX_NAMES[it.name] || esc(it.name)}（[:${esc(it.name)}:]）`;
+      return it.negate ? `${name} 以外` : name;
+    }
     return charHtml(it.value);
   }
 
@@ -424,7 +802,7 @@
     if (node.items.length === 0) {
       return node.negate ? anyCharNoun(true) : '存在しない文字（[] はどの文字にも一致しない）';
     }
-    const parts = node.items.map(classItemHtml);
+    const parts = node.items.map((it) => classItemHtml(it, ctx));
     if (node.negate) return `${parts.join('、')} 以外の文字`;
     if (parts.length === 1) {
       const it = node.items[0];
@@ -434,16 +812,22 @@
     return `${parts.join('、')} のどれか`;
   }
 
-  function anyCharNoun(withNewline) {
-    return withNewline ? '任意の文字（改行も含む）' : '任意の文字（改行以外）';
+  function anyCharNoun(withNewline, ctx) {
+    if (isJsCtx(ctx)) return withNewline ? '任意の文字（改行も含む）' : '任意の文字（改行以外）';
+    const d = ctx.dialect;
+    // サクラエディタは s フラグにかかわらず、. を [^\r\n] に置き換える
+    if (withNewline && d !== 'sakura') return '任意の文字（改行も含む）';
+    if (d === 'java') return '任意の文字（改行以外。CR や U+0085 なども除く）';
+    if (d === 'sakura') return '任意の文字（改行以外。CR と LF を除く）';
+    return '任意の文字（LF の改行以外。CR には一致する）';
   }
 
   // 1 文字に当たる部品なら、その文字を表す名詞を返す。違えば null
   function singleNoun(node, ctx) {
     switch (node.type) {
       case 'char': return charHtml(node.value);
-      case 'set': return SET_NOUN[node.kind];
-      case 'dot': return anyCharNoun(ctx.flags.includes('s'));
+      case 'set': return setNoun(node.kind, ctx);
+      case 'dot': return anyCharNoun(ctx.flags.includes('s'), ctx);
       case 'class': return classNoun(node, ctx);
       case 'uprop': return upropNoun(node);
       default: return null;
@@ -452,9 +836,13 @@
 
   function anchorName(node, ctx) {
     const unit = ctx.flags.includes('m') ? '行' : '文字列';
+    const beforeFinal = !isJsCtx(ctx) && DL().dollarBeforeFinal(ctx.dialect);
     switch (node.kind) {
       case 'start': return `${unit}の先頭`;
-      case 'end': return `${unit}の末尾`;
+      case 'end': return unit === '文字列' && beforeFinal ? '文字列の末尾（最後の改行の直前も含む）' : `${unit}の末尾`;
+      case 'strStart': return '文字列の先頭（複数行のモードでも）';
+      case 'strEnd': return '文字列の末尾（最後の改行の直前は含まない）';
+      case 'strEndNl': return '文字列の末尾（最後の改行の直前も含む）';
       case 'wordb': return '単語の区切り';
       default: return '単語の区切りではない位置';
     }
@@ -463,7 +851,10 @@
   function anchorTree(node, ctx) {
     const name = pos(anchorName(node, ctx));
     switch (node.kind) {
-      case 'wordb': return `ここが ${name}（英数字・${UNDERSCORE} と、それ以外の文字との境目）`;
+      case 'wordb': {
+        const word = !isJsCtx(ctx) && DL().unicodeWord(ctx.dialect) ? `文字・数字・${UNDERSCORE}` : `英数字・${UNDERSCORE}`;
+        return `ここが ${name}（${word} と、それ以外の文字との境目）`;
+      }
       case 'nonwordb': return `ここは ${pos('単語の区切り')} ではない`;
       default: return `ここが ${name}`;
     }
@@ -473,7 +864,8 @@
     if (node.name != null) {
       return `グループ「${esc(node.name)}」と同じ文字列（そこで一致した内容がもう一度現れる）`;
     }
-    if (node.index > ctx.groupCount) {
+    if (node.missing) return `グループ${node.index}と同じ文字列（ただし、グループ${node.index}はないので、一致しない）`;
+    if (isJsCtx(ctx) && node.index > ctx.groupCount) {
       // u フラグがないと、JavaScript はこれをグループの参照ではなく、8進数の文字コードか数字そのものとして読む
       return ctx.flags.includes('u')
         ? `グループ${node.index}と同じ文字列（ただし、グループ${node.index}はありません）`
@@ -496,6 +888,7 @@
     const notes = [];
     if (withOptional && node.min === 0) notes.push('なくてもよい');
     if (node.lazy) notes.push('できるだけ短く');
+    if (node.possessive) notes.push('一度一致したら戻って試し直さない');
     return notes.length ? `（${notes.join('・')}）` : '';
   }
 
@@ -505,13 +898,34 @@
     s: '. を改行にも一致させる',
   };
 
+  function applyFlags(ctx, on, off) {
+    let flags = ctx.flags;
+    for (const f of off) flags = flags.replace(f, '');
+    for (const f of on) if (!flags.includes(f)) flags += f;
+    return { ...ctx, flags };
+  }
+
   // (?i:...) や (?-s:...) の中で使うフラグ
   function innerCtx(node, ctx) {
     if (node.kind !== 'modifier') return ctx;
-    let flags = ctx.flags;
-    for (const f of node.modOff) flags = flags.replace(f, '');
-    for (const f of node.modOn) if (!flags.includes(f)) flags += f;
-    return { ...ctx, flags };
+    return applyFlags(ctx, node.modOn, node.modOff);
+  }
+
+  function flagsText(on, off) {
+    const parts = [];
+    for (const f of on) parts.push(FLAG_WORDS[f]);
+    for (const f of off) parts.push(`「${FLAG_WORDS[f]}」をやめる`);
+    return parts.join('、');
+  }
+
+  // 並びの部品を順に処理する。(?i) のようなフラグがあれば、そのあとの部品にだけ効かせる
+  function mapSeq(items, ctx, fn) {
+    let c = ctx;
+    return items.map((n) => {
+      const r = fn(n, c);
+      if (n.type === 'flags') c = applyFlags(c, n.on, n.off);
+      return r;
+    });
   }
 
   const LOOK_NOTE = '（確かめるだけで、一致した文字列には含めない）';
@@ -525,12 +939,8 @@
       case 'neglookahead': return `すぐ後ろに次が続かないこと${LOOK_NOTE}`;
       case 'lookbehind': return `すぐ前に次があること${LOOK_NOTE}`;
       case 'neglookbehind': return `すぐ前に次がないこと${LOOK_NOTE}`;
-      case 'modifier': {
-        const parts = [];
-        for (const f of node.modOn) parts.push(FLAG_WORDS[f]);
-        for (const f of node.modOff) parts.push(`「${FLAG_WORDS[f]}」をやめる`);
-        return `この中だけ、${parts.join('、')}`;
-      }
+      case 'modifier': return `この中だけ、${flagsText(node.modOn, node.modOff)}`;
+      case 'atomic': return '次をひとまとまりにして、一度一致したら戻って試し直さない（アトミックグループ）';
       default: return 'グループ';
     }
   }
@@ -540,7 +950,7 @@
   function bodyChildren(body, ctx) {
     if (body.type === 'seq') {
       if (body.items.length === 0) return [{ html: EMPTY, start: body.start, end: body.end }];
-      return body.items.map((n) => describe(n, ctx));
+      return mapSeq(body.items, ctx, describe);
     }
     return [describe(body, ctx)];
   }
@@ -552,6 +962,9 @@
       case 'literal': return `${stringHtml(node.value)} という文字列`;
       case 'anchor': return anchorTree(node, ctx);
       case 'backref': return backrefText(node, ctx);
+      case 'flags': return `ここから後ろ（このグループの終わりまで）は、${flagsText(node.on, node.off)}`;
+      case 'comment': return 'コメント（一致には関係しない）';
+      case 'linebreak': return '改行 1 つ（CRLF・LF・CR など）';
       default: {
         const noun = singleNoun(node, ctx);
         return noun ? `${noun}が1文字` : null;
@@ -572,7 +985,7 @@
         return {
           ...base,
           html: '次の並び',
-          children: node.items.map((n) => describe(n, ctx)),
+          children: mapSeq(node.items, ctx, describe),
           listType: 'steps',
         };
       case 'alt':
@@ -607,7 +1020,7 @@
     const verb = optional ? 'あってもなくてもよい' : `${countText(node.min, node.max, '回')}繰り返す`;
     const lazy = quantNote(node, !optional);
 
-    if (t.type === 'backref' || t.type === 'anchor') {
+    if (t.type === 'backref' || t.type === 'anchor' || t.type === 'linebreak') {
       return { ...base, html: `${leafTree(t, ctx)}を${verb}${lazy}` };
     }
     // (?:...) は「ひとまとめにする」を挟まず、中身を直接並べる
@@ -663,10 +1076,15 @@
       case 'anchor': return pos(anchorName(node, ctx));
       case 'backref':
         if (node.name != null) return `グループ「${esc(node.name)}」と同じ文字列`;
-        if (node.index > ctx.groupCount && !ctx.flags.includes('u')) return stringHtml(legacyBackrefText(node.raw));
+        if (isJsCtx(ctx) && node.index > ctx.groupCount && !ctx.flags.includes('u')) return stringHtml(legacyBackrefText(node.raw));
         return `グループ${node.index}と同じ文字列`;
       case 'seq':
-        return node.items.length ? node.items.map((n) => short(n, ctx)).join(` ${ARROW} `) : '何もない';
+        return node.items.length
+          ? mapSeq(node.items, ctx, short).filter((t) => t).join(` ${ARROW} `) || '何もない'
+          : '何もない';
+      case 'flags': return `〔ここから後ろは、${flagsText(node.on, node.off)}〕`;
+      case 'comment': return '';
+      case 'linebreak': return '改行 1 つ';
       case 'alt':
         return `［${altChain(node, ctx)}］`;
       case 'group': {
@@ -716,8 +1134,9 @@
     if (head) items = items.slice(1);
     const tail = isAnchor(items[items.length - 1], 'end');
     if (tail) items = items.slice(0, -1);
-    // 文字だけの手順は、1 行で見ても文字だと分かるよう「という文字」を付ける
-    const steps = items.map((n) => step(n, short(n, ctx) + (n.type === 'char' || n.type === 'literal' ? ' という文字' : '')));
+    // 文字だけの手順は、1 行で見ても文字だと分かるよう「という文字」を付ける。コメントは手順に入れない
+    const steps = mapSeq(items, ctx, (n, c) => (n.type === 'comment' ? null
+      : step(n, short(n, c) + (n.type === 'char' || n.type === 'literal' ? ' という文字' : '')))).filter(Boolean);
 
     let scope;
     if (!items.length) {
@@ -773,7 +1192,9 @@
           add(n.end - 1, n.end, kind);
           break;
         }
-        case 'class': case 'set': case 'uprop': case 'dot': add(n.start, n.end, 'class'); break;
+        case 'class': case 'set': case 'uprop': case 'dot': case 'linebreak': add(n.start, n.end, 'class'); break;
+        case 'flags': add(n.start, n.end, 'look'); break;
+        case 'comment': add(n.start, n.end, 'esc'); break;
         case 'anchor': add(n.start, n.end, 'anchor'); break;
         case 'backref': add(n.start, n.end, 'ref'); break;
         case 'char': if (n.end - n.start > 1) add(n.start, n.end, 'esc'); break;
@@ -787,22 +1208,44 @@
     return out;
   }
 
-  function explain(src, flags) {
-    const { ast, groupCount } = parse(src, flags);
-    const ctx = { flags, groupCount };
+  // JavaScript 以外のフラグの説明。g は正規表現そのものではなく、試す欄の設定
+  const FLAG_TEXT_OTHER = {
+    g: 'すべての一致を探す（試す欄の設定。プログラムでは、すべての一致を返す関数を選んで決める）',
+    i: FLAG_TEXT.i,
+    m: FLAG_TEXT.m,
+    s: FLAG_TEXT.s,
+  };
+
+  function explain(src, flags, dialect = 'js') {
+    const { ast, groupCount, dialect: d } = parse(src, flags, dialect);
+    const forced = d === 'js' ? '' : global.RegexDialects.forcedFlags(d);
+    const ctx = { flags: flags + forced, groupCount, dialect: d };
     let tree;
     if (ast.type === 'seq') {
       tree = ast.items.length
-        ? ast.items.map((n) => describe(n, ctx))
+        ? mapSeq(ast.items, ctx, describe)
         : [{ html: '空の正規表現（どの位置にも、長さ 0 で一致する）', start: 0, end: 0 }];
     } else {
       tree = [describe(ast, ctx)];
     }
+    // 要約の「文字列」「行」は、先頭の (?m) も見て決める
+    let sctx = ctx;
+    if (ast.type === 'seq') {
+      for (const n of ast.items) {
+        if (n.type !== 'flags') break;
+        sctx = applyFlags(sctx, n.on, n.off);
+      }
+    }
+    const texts = d === 'js' ? FLAG_TEXT : FLAG_TEXT_OTHER;
+    const flagList = [...flags].filter((f) => texts[f]).map((f) => ({ flag: f, text: texts[f] }));
+    for (const f of forced) {
+      flagList.push({ flag: f, text: `${FLAG_TEXT[f]}（${global.RegexDialects.get(d).name}では常に有効）` });
+    }
     return {
       tree,
-      summary: summarize(ast, ctx),
+      summary: summarize(ast, sctx),
       groupCount,
-      flags: [...flags].filter((f) => FLAG_TEXT[f]).map((f) => ({ flag: f, text: FLAG_TEXT[f] })),
+      flags: flagList,
     };
   }
 

@@ -613,3 +613,46 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
 .tip-count { margin-left: auto; font-size: 0.75rem; color: var(--muted); }
 .tip-gap { height: 8px; }
 .tip-lines > div { display: flex; align-items: baseline; gap: 12px; }
+
+/* 対象の言語 */
+.dialect-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.dialect-select select { font-size: 0.9rem; }
+.dialect-engine { margin: -4px 0 8px; }
+.flags label[hidden], .slash[hidden], .flag-view[hidden] { display: none; }
+
+/* 試す欄で、ほかの言語を JavaScript に置き換えて動かすときの注意 */
+.notes {
+  margin: 0 0 8px;
+  padding: 8px 12px 8px 28px;
+  border-radius: 6px;
+  background: var(--lit-bg);
+  font-size: 0.85rem;
+}
+.notes[hidden] { display: none; }
+
+/* ほかの言語で使うと */
+.porta { list-style: none; margin: 0; padding: 0; font-size: 0.9rem; }
+.porta li {
+  display: grid;
+  grid-template-columns: 9em 7em minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.porta-name { font-weight: 600; }
+.porta-status { font-size: 0.85rem; }
+.porta-same .porta-status { color: var(--ok); }
+.porta-differs .porta-status { color: var(--accent); }
+.porta-error .porta-status { color: var(--error); }
+.porta-why { color: var(--muted); font-size: 0.85rem; }
+@media (max-width: 560px) {
+  .porta li { grid-template-columns: 1fr auto; }
+  .porta-why { grid-column: 1 / -1; }
+}

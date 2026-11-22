@@ -20,7 +20,7 @@
         <div id="layout-picker" class="layout-picker" role="group" aria-label="欄の配置"></div>
       </details>
     </div>
-    <p class="lead">部品を選んで正規表現を組み立てると、意味を日本語で表示します。JavaScript の正規表現の書き方に合わせています。</p>
+    <p class="lead">部品を選んで正規表現を組み立てると、意味を日本語で表示します。JavaScript・Python・Java・PHP・C#・Go・サクラエディタの書き方を切り替えられます。</p>
   </header>
 
   <main class="main">
@@ -28,8 +28,12 @@
       <section class="panel card" data-card="pattern" aria-labelledby="pattern-title">
         <div class="card-head">
           <h2 id="pattern-title">正規表現</h2>
+          <label class="dialect-select">言語
+            <select id="dialect" aria-describedby="dialect-engine"></select>
+          </label>
           <span id="match-badge" class="badge" hidden></span>
         </div>
+        <p id="dialect-engine" class="hint dialect-engine"></p>
         <div class="pattern-row">
           <span class="slash">/</span>
           <div class="editor pattern-editor">
@@ -111,6 +115,7 @@
         <p class="hint">項目にマウスを乗せると、上の正規表現の入力欄で、対応する部分に色が付きます。入力欄の中にカーソルを置くと、その位置の項目に色が付きます。</p>
         <div id="tree" class="tree"></div>
         <div id="flag-explain"></div>
+        <div id="portability"></div>
       </section>
 
       <section class="panel card tester" data-card="tester" aria-labelledby="tester-title">
@@ -123,6 +128,7 @@
           <textarea id="test-input" rows="5" spellcheck="false" aria-label="試す文字列" placeholder="ここに文字列を入れると、一致した部分に色が付きます"></textarea>
         </div>
         <p id="match-count" class="match-count"></p>
+        <ul id="dialect-notes" class="notes" hidden></ul>
         <div id="match-table"></div>
         <div id="line-panel" hidden>
           <h3>行ごとの判定</h3>
@@ -137,7 +143,9 @@
   <div id="toast-area" class="toast-area" role="status" aria-live="polite"></div>
   <p id="layout-status" class="sr-only" aria-live="polite"></p>
 
+  <script src="dialects.js"></script>
   <script src="regex-explain.js"></script>
+  <script src="translate.js"></script>
   <script src="match-core.js"></script>
   <script src="layout.js"></script>
   <script src="app.js"></script>

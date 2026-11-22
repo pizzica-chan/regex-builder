@@ -5,13 +5,17 @@
 (function (global) {
   'use strict';
 
-  // ranges は各グループの [開始, 終了]。一致しなかったグループは null
-  function pack(m) {
+  // ranges は各グループの [開始, 終了]。一致しなかったグループは null。
+  // groupMap を渡すと、元の正規表現のグループ番号（1 から）に並べ直す。
+  // JavaScript 以外の言語を置き換えて動かすとき、グループが増えたり番号がずれたりするため（translate.js）
+  function pack(m, groupMap) {
+    const order = groupMap ? groupMap.slice(1) : null;
+    const pick = (arr, fallback) => (order ? order.map((j) => (j == null ? fallback : arr[j])) : arr.slice(1));
     return {
       index: m.index,
       text: m[0],
-      groups: m.slice(1),
-      ranges: m.indices ? m.indices.slice(1).map((r) => r || null) : null,
+      groups: pick(m, undefined),
+      ranges: m.indices ? pick(m.indices, null).map((r) => r || null) : null,
     };
   }
 
@@ -24,17 +28,17 @@
   }
 
   // lines を渡すと、各行を別々の文字列として調べ、一致したかを lineHits に入れる
-  function findAll(source, flags, text, max, lines) {
+  function findAll(source, flags, text, max, lines, groupMap) {
     const re = compile(source, flags);
     const matches = [];
     if (re.global) {
       for (const m of text.matchAll(re)) {
-        matches.push(pack(m));
+        matches.push(pack(m, groupMap));
         if (matches.length >= max) break;
       }
     } else {
       const m = re.exec(text);
-      if (m) matches.push(pack(m));
+      if (m) matches.push(pack(m, groupMap));
     }
     let lineHits = null;
     if (lines) {
