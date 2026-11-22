@@ -429,8 +429,13 @@
     if (node.name != null) {
       return `グループ「${esc(node.name)}」と同じ文字列（そこで一致した内容がもう一度現れる）`;
     }
-    const missing = node.index > ctx.groupCount ? '（ただし、そのグループはありません）' : '';
-    return `グループ${node.index}と同じ文字列（そこで一致した内容がもう一度現れる）${missing}`;
+    if (node.index > ctx.groupCount) {
+      // u フラグがないと、JavaScript はこれをグループの参照ではなく、8進数の文字コードか数字そのものとして読む
+      return ctx.flags.includes('u')
+        ? `グループ${node.index}と同じ文字列（ただし、グループ${node.index}はありません）`
+        : `グループ${node.index}はないので、グループの参照ではなく、8進数の文字コードの文字か、数字そのものとして扱われる`;
+    }
+    return `グループ${node.index}と同じ文字列（そこで一致した内容がもう一度現れる）`;
   }
 
   // 回数の言い方。unit は「文字」か「回」
@@ -598,7 +603,9 @@
       case 'literal': return stringHtml(node.value);
       case 'anchor': return pos(anchorName(node, ctx));
       case 'backref':
-        return node.name != null ? `グループ「${esc(node.name)}」と同じ文字列` : `グループ${node.index}と同じ文字列`;
+        if (node.name != null) return `グループ「${esc(node.name)}」と同じ文字列`;
+        if (node.index > ctx.groupCount && !ctx.flags.includes('u')) return `\\${node.index}（8進数の文字コードか数字）`;
+        return `グループ${node.index}と同じ文字列`;
       case 'seq':
         return node.items.length ? node.items.map((n) => short(n, ctx)).join(` ${ARROW} `) : '何もない';
       case 'alt':

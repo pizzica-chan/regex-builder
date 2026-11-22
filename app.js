@@ -74,7 +74,7 @@
     { name: '日付（YYYY-MM-DD）', pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\\d|3[01])', flags: 'g', test: '締め切りは 2026-11-30、開始は 2026-12-01 です。2026-13-01 は月が正しくありません。' },
     { name: 'URL（http と https）', pattern: 'https?://[\\w.-]+(?:/[\\w\\-./?%&=#~]*)?', flags: 'g', test: '詳しくは https://example.com/docs?page=2 を見てください。http://localhost:8080/ も使えます。' },
     { name: 'ひらがなだけの行', pattern: '^[ぁ-んー]+$', flags: 'gm', test: 'ひらがな\nカタカナ\nまぜまぜカナ\nらーめん' },
-    { name: 'HTML のタグ（最短一致）', pattern: '<[^>]+?>', flags: 'g', test: '<p>こんにちは <strong>世界</strong></p>' },
+    { name: 'HTML のタグ（最短一致）', pattern: '<.+?>', flags: 'g', test: '<p>こんにちは <strong>世界</strong></p>' },
     { name: '同じ単語の繰り返し', pattern: '\\b(\\w+)\\s+\\1\\b', flags: 'gi', test: 'This is is a test. The the end.' },
     { name: '金額（3 桁ごとのカンマ）', pattern: '(?<!\\d)\\d{1,3}(?:,\\d{3})*(?=円)', flags: 'g', test: '合計 1,234,567円、送料 500円、品番 12345' },
   ];
@@ -169,6 +169,8 @@
     el.addEventListener('focus', () => showTip(el, item, code));
     el.addEventListener('mouseleave', () => hideTip(el));
     el.addEventListener('blur', () => hideTip(el));
+    // タッチ操作では mouseleave が起きないので、押したら閉じる
+    el.addEventListener('click', () => hideTip(el));
   }
 
   window.addEventListener('scroll', () => { tipEl.hidden = true; }, { passive: true });
@@ -395,6 +397,16 @@
     table.innerHTML = `<div class="table-wrap"><table><thead><tr><th>#</th><th>位置</th><th>一致した文字列</th>${heads.join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
+  // 自前の解析で誤りの場所が分かれば、日本語の説明を返す。分からなければ null（ブラウザの英語の説明を使う）
+  function japaneseError(src, flags) {
+    try {
+      window.RegexExplain.parse(src, flags);
+    } catch (e) {
+      if (e instanceof RegexParseError) return `${e.message}（${e.pos + 1}文字目）`;
+    }
+    return null;
+  }
+
   let lastRe = null;
 
   function update() {
@@ -408,7 +420,7 @@
         lastRe = new RegExp(src, flags);
         showError('');
       } catch (e) {
-        showError(`正規表現の書き方に誤りがあります：${e.message}`);
+        showError(`正規表現の書き方に誤りがあります。${japaneseError(src, flags) || e.message}`);
       }
     } else {
       showError('');
@@ -489,7 +501,8 @@
     });
     $('copy-link').addEventListener('click', () => {
       saveToHash(patternEl.value, currentFlags());
-      setTimeout(() => copy(location.href, '共有 URL をコピーしました'), 350);
+      const note = testEl.value.length > 2000 ? '（試す文字列は 2000 文字を超えるので、含めていません）' : '';
+      setTimeout(() => copy(location.href, `共有 URL をコピーしました${note}`), 350);
     });
     $('clear').addEventListener('click', () => {
       patternEl.value = '';
