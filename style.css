@@ -652,6 +652,7 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
 .porta-minor .porta-status { color: var(--ok); }
 .porta-differs .porta-status { color: var(--accent); }
 .porta-error .porta-status { color: var(--error); }
+.porta-unsupported .porta-status { color: var(--muted); }
 .porta-why { color: var(--muted); font-size: 0.85rem; }
 @media (max-width: 560px) {
   .porta li { grid-template-columns: 1fr auto; }
@@ -675,3 +676,4 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
   overflow-x: auto;
   tab-size: 4;
 }
+.sample-code.steps { white-space: pre-wrap; }

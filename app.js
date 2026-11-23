@@ -563,7 +563,7 @@
     el.append(list);
   }
 
-  const PORTA_LABEL = { same: '同じ意味', minor: 'ほぼ同じ意味', differs: '意味が変わる', error: '書けない' };
+  const PORTA_LABEL = { same: '同じ意味', minor: 'ほぼ同じ意味', differs: '意味が変わる', error: '書けない', unsupported: '調べられない' };
 
   function renderPortability(src, flags) {
     const el = $('portability');
@@ -627,6 +627,8 @@
     $('sample-copy').disabled = !result;
     $('sample-code').textContent = result ? result.code : '';
     $('sample-code').parentElement.hidden = !result;
+    // 検索の手順（サクラエディタ）は文なので、幅の狭い画面でも横に動かさずに読めるよう折り返す
+    $('sample-code').parentElement.classList.toggle('steps', !!result && result.kind === 'steps');
     if (!result) {
       $('sample-hint').textContent = '正しい正規表現を入れると、ここに出ます。';
       return;
@@ -1385,6 +1387,12 @@
   setupMatchTable();
   setupTools();
   setupSample();
+  // 開いているタブのアドレス欄に共有 URL を貼ったときは、# のあとだけが変わり、ページは読み込み直されないので、ここで読み込む。
+  // saveToHash の history.replaceState では、このイベントは起きない
+  window.addEventListener('hashchange', () => {
+    expectations.clear();
+    if (loadFromHash()) update();
+  });
   if (!loadFromHash()) {
     const p = PRESETS[3];
     patternEl.value = forDialect(p, 'pattern');

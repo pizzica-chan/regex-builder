@@ -1015,8 +1015,8 @@
   }
 
   // from の言語で書いた正規表現を、ほかの各言語で使うとどうなるかを返す。
-  // 各要素は { dialect, status: 'same' | 'minor' | 'differs' | 'error', reasons: [...] }。
-  // minor は、あまり使わない文字（U+0085 など）でだけ結果が変わるとき
+  // 各要素は { dialect, status: 'same' | 'minor' | 'differs' | 'error' | 'unsupported', reasons: [...] }。
+  // minor は、あまり使わない文字（U+0085 など）でだけ結果が変わるとき。unsupported は、このツールがその言語の読み方に対応していないとき
   function portability(src, flags, fromId) {
     const RE = global.RegexExplain;
     const D = global.RegexDialects;
@@ -1051,8 +1051,10 @@
         }
         parsed = RE.parse(src, toFlags, toId);
       } catch (e) {
-        const msg = to === 'js' && e instanceof RE.RegexParseError ? `JavaScript では${e.message}` : e.message;
-        out.push({ dialect: toId, status: 'error', reasons: [msg] });
+        // 「このツールは〜には対応していません」は、その言語では書けるが、このツールが読めない書き方（Java の [[:alpha:]] の入れ子など）
+        const unsupported = e instanceof RE.RegexParseError && e.message.startsWith('このツールは');
+        const msg = to === 'js' && e instanceof RE.RegexParseError && !unsupported ? `JavaScript では${e.message}` : e.message;
+        out.push({ dialect: toId, status: unsupported ? 'unsupported' : 'error', reasons: [msg] });
         continue;
       }
       if (shape(parsed.ast) !== shape(base.ast)) {
