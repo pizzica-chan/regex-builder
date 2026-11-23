@@ -1,4 +1,4 @@
-"""Python の re で probes.json の各正規表現を試し、結果を JSON で出す。tools/dialect-probe/README.md を参照。"""
+"""Python の re で probes.json の各正規表現を試し、結果を JSON で出す。出力は results/python.json に保存し、compare.js でほかの言語の結果と比べる。"""
 import json
 import re
 import sys

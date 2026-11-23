@@ -261,3 +261,13 @@
   - 直した: 幅の狭い画面で、サクラエディタの検索の手順が折り返されず、横に動かさないと読めなかった。手順のときだけ折り返す
   - 直した: 16 回目に直した、POSIX のコマンドの例の g フラグの扱いを、`docs/dialects/posix.md` の「このツールでの扱い」に書いていなかった（横展開）
   - 直した: `docs/dialects/python.md` の「名前はPython」で、英字の前に空白がなかった
+
+## 2026-11-24 全体のセルフレビュー（18 回目）
+
+- 観点: 日本語の表記、技術的な正しさ、横展開
+- 範囲: 17 回目に中身を読まなかった `translate.js` の置き換えの処理（`emit` と `buildProgram`）と、`tools/dialect-probe/` の道具（`match.py`、`match.php`、`Match.java`、`go/match/main.go`、`cs-match/Program.cs`、`match-ps.ps1`、`match-grep.js`、`probe-sakura.ps1`、`probe.py`、`Probe.java`、`compare.js`、`fit-classes.js`、`verify.js`）。`probe.js`、`probe.php`、`go/main.go`、`cs/Program.cs`、`probe-ps.ps1` は冒頭の説明だけを読んだ。`results/` の結果のファイルは対象外
+- モデル: claude-opus-5-5（エフォート: 不明）
+- 結果: 指摘 3 件。3 件とも、この記録と同じコミットで直した。`translate.js` には指摘はなかった。直した `Match.java` と `Probe.java` は、保存してある結果（`results/match-java.json` の 249 件と `results/java.json`）と同じ出力になった
+  - 直した: `Match.java` と `Probe.java` の JSON の読み取りが、`\b` と `\f` のエスケープを戻さず、「b」と「f」の文字にしていた。今の事例には当たらないが、改ページなどを含む事例を足すと、Java の結果だけがずれる。2 つを戻すようにした
+  - 直した: `probe.py` の説明が、ない `tools/dialect-probe/README.md` を見るよう書いていた。出力の保存先と比べ方を書いた
+  - 直した: `probe-sakura.ps1` のコメントが、「cases.json には、末尾の空の一致を含む事例を入れない」と書いていた。実際には `x*` などの事例があり、`verify.js` がわかっている違いとして扱っている。そのとおりに書き直した

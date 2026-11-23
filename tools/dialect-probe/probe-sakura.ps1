@@ -61,7 +61,8 @@ public static class Breg {
             int pos = 0;
             while (pos <= limit && list.Count < 100) {
                 // 文字列の末尾から探し始めると、BMatchExW が誤りを返す（実際の結果）。そのため、前の一致が末尾で終わったときの、
-                // 末尾の長さ 0 の一致（"a\n" の $ の 2 つ目など）は調べられない。cases.json には、末尾の空の一致を含む事例を入れない
+                // 末尾の長さ 0 の一致（"a\n" の $ の 2 つ目など）は調べられない。cases.json の、末尾の空の一致を含む事例（x* など）は、
+                // verify.js でわかっている違いとして扱う
                 if (pos == text.Length && text.Length > 0) break;
                 int r = BMatchExW("m\u0001" + pattern + "\u0001" + options, buf, IntPtr.Add(buf, pos * 2), end, ref rx, msg);
                 if (r < 0) return null;

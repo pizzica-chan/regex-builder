@@ -38,6 +38,8 @@ public class Match {
                 case 'n': sb.append('\n'); break;
                 case 'r': sb.append('\r'); break;
                 case 't': sb.append('\t'); break;
+                case 'b': sb.append('\b'); break;
+                case 'f': sb.append('\f'); break;
                 case 'u': sb.append((char) Integer.parseInt(s.substring(i + 1, i + 5), 16)); i += 4; break;
                 default: sb.append(n);
             }
