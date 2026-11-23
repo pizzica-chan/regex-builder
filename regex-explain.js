@@ -502,6 +502,12 @@
         else if (rest.startsWith('?<')) {
           const m = /^\?<([^>]+)>/.exec(rest);
           if (!m) err('グループ名の書き方が正しくありません');
+          // 名前は JavaScript の識別子と同じ決まり（a のような書き方も使える）
+          const plainName = m[1].replace(/\\u(?:\{([0-9a-fA-F]+)\}|([0-9a-fA-F]{4}))/g,
+            (_, a, b) => { const cp = parseInt(a || b, 16); return cp > 0x10ffff ? '-' : String.fromCodePoint(cp); });
+          if (!/^[$_\p{ID_Start}][$‌‍\p{ID_Continue}]*$/u.test(plainName)) {
+            err('JavaScript では、グループ名に使えるのは文字・数字と _ と $ です（1 文字目に数字は使えません）', start);
+          }
           kind = 'named';
           name = m[1];
           groupNames.push(name);

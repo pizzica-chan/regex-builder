@@ -1286,7 +1286,7 @@
     const engine = /[A-Za-z0-9)]$/.test(d.engine) ? `${d.engine} ` : d.engine;
     // テストの欄で JavaScript に置き換えて動かすことは書かない。結果がずれる場面だけ、テストの欄に注意を出す
     $('dialect-engine').textContent = `${engine}の書き方と意味に合わせています。${d.note || ''}`;
-    $('copy-literal').title = isJs() ? '/…/flags の形でコピー' : `${d.name}のコードの形でコピー`;
+    $('copy-literal').title = isJs() ? '/…/flags の形でコピー' : `${Dialects.subject(dialect)}のコードの形でコピー`;
     buildPalette();
     buildPresets();
     if (save) {
@@ -1339,7 +1339,7 @@
         return;
       }
       const code = Dialects.codeSnippet(src, currentFlags().replace('g', ''), dialect);
-      copy(code, `${Dialects.get(dialect).name}の形でコピーしました: ${code}`);
+      copy(code, `${Dialects.subject(dialect)}の形でコピーしました: ${code}`);
     });
     $('copy-link').addEventListener('click', () => {
       saveToHash(patternEl.value, currentFlags());
