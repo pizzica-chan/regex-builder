@@ -34,6 +34,11 @@ const CASES = [
   { p: String.raw`\$[0-9]+`, f: 'g', s: '$5 and $10, ${x}' },
   { p: '/x/', f: 'g', s: 'a/x/b' },
   { p: String.raw`(a)(?<n>b)`, by: { posix: '(a)(b)' }, f: 'g', s: 'ab ab' },
+  // 長さ 0 の一致。一致のあとの探し方は言語で違う（dialects.js の EMPTY_MODE）
+  { p: 'x*', f: 'g', s: 'axx b' },
+  { p: String.raw`\b`, f: 'g', s: 'ab cd' },
+  { p: 'a|', f: 'g', s: 'bab' },
+  { p: 'x*', f: '', s: 'axx' },
 ];
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sample-programs-'));

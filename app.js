@@ -634,7 +634,7 @@
     sampleCode = result.code;
     let hint;
     if (sakura) {
-      hint = 'サクラエディタで今の正規表現を使って検索する手順です。フラグは (?i) のように正規表現の先頭に書いています。';
+      hint = 'サクラエディタで今の正規表現を使って検索する手順です。';
     } else if (posix) {
       hint = 'テスト文字列を 1 行ずつ grep に渡し、一致した部分を 1 行に 1 つずつ出すコマンドです（bash などのシェルで動かします）。';
     } else {
@@ -1185,7 +1185,8 @@
     const p = new URLSearchParams(location.hash.slice(1));
     if (!p.has('p') && !p.has('t')) return false;
     setDialect(p.get('d') || 'js', false);
-    patternEl.value = p.get('p') || '';
+    // 正規表現の欄には改行を入れられない（入力のときと同じく \n にする）。改行が残ると、コピーやコード例の文字列が切れる
+    patternEl.value = (p.get('p') || '').replace(/\r\n|\r|\n/g, '\\n');
     setFlags(p.get('f') ?? '');
     testEl.value = p.get('t') || '';
     lineModeEl.checked = p.get('l') === '1';

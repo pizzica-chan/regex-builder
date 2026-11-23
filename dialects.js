@@ -577,10 +577,17 @@
         return lines(`printf '%s\\n' ${quoted} | ${codeSnippet(src, plain, dialect).replace(/^grep /, 'grep -o ')}`);
       }
       case 'sakura':
+        // 検索のダイアログの項目の名前は、サクラエディタ 2.4.2 のヘルプ（HLP000059）による。
+        // 大文字と小文字の区別は「英大文字と小文字を区別する」のチェックで決まる（チェックがないと、本体が i を付けて bregonig.dll に渡す）
         return {
           kind: 'steps',
-          code: ['1. 検索（Ctrl+F）を開き、「正規表現」にチェックを入れます', '2. 検索する文字列に次の正規表現を入れて、検索します', '',
-            codeSnippet(src, plain, dialect)].join('\n'),
+          code: [
+            '1. 検索（Ctrl+F）を開き、「正規表現」にチェックを入れます',
+            `2. 「英大文字と小文字を区別する」のチェックを${flags.includes('i') ? '外します' : '入れます'}`,
+            '3. 「条件」に次の正規表現を入れて、［下検索］を押します',
+            '',
+            src,
+          ].join('\n'),
         };
       default:
         return null;
