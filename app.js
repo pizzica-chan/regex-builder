@@ -1185,8 +1185,8 @@
     const p = new URLSearchParams(location.hash.slice(1));
     if (!p.has('p') && !p.has('t')) return false;
     setDialect(p.get('d') || 'js', false);
-    // 正規表現の欄には改行を入れられない（入力のときと同じく \n にする）。改行が残ると、コピーやコード例の文字列が切れる
-    patternEl.value = (p.get('p') || '').replace(/\r\n|\r|\n/g, '\\n');
+    // 正規表現の欄には改行を入れられないので、LF を \n、CR を \r の書き方にする。改行が残ると、コピーやコード例の文字列が切れる
+    patternEl.value = (p.get('p') || '').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
     setFlags(p.get('f') ?? '');
     testEl.value = p.get('t') || '';
     lineModeEl.checked = p.get('l') === '1';
