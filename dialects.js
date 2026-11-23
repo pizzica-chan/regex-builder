@@ -346,8 +346,9 @@
 
   // サクラエディタ本体が正規表現を bregonig.dll に渡す前にする置き換え（v2.4.2 の CBregexp::MakePatternAlternate を写したもの）。
   // \ の付いていない、文字クラスと \Q…\E の外の . を [^\r\n] に、$ を (?<![\r\n])(?=\r|$) にする。
-  // 文字クラスは [ と ] の数で入れ子の深さを数えるので、[[:alnum:]_.-] の . は置き換えない
-  function sakuraEditorPattern(src) {
+  // 文字クラスは [ と ] の数で入れ子の深さを数えるので、[[:alnum:]_.-] の . は置き換えない。
+  // info を渡すと、info.from に、置き換えたあとの各位置に当たる元の位置（UTF-16 の単位）を、info.replaced に、置き換えた記号（. と $）を入れる
+  function sakuraEditorPattern(src, info = null) {
     // 状態: 0 外側、1 外側の \ のあと、2 外側の \c のあと、3 文字クラスの中、4 その中の \ のあと、5 その中の \c のあと、6 \Q…\E の中、7 その中の \ のあと
     // 文字の種類: 0 ほか、1 .、2 $、3 c、4 Q、5 E、6 [、7 ]、8 \。-1 は文字クラスに入る、-2 は出る、-3 は . の置き換え、-4 は $ の置き換え
     const TABLE = [
@@ -364,13 +365,23 @@
     let state = 0;
     let level = 0;
     let out = '';
+    const from = [];
+    const replaced = [];
+    let i = 0;
     // 本体は UTF-16 の 1 単位ずつ読む。置き換える文字はどれも ASCII なので、サロゲートペアの途中で状態は変わらない
     for (const ch of src) {
       const next = TABLE[state][KIND[ch] || 0];
-      if (next >= 0) { state = next; out += ch; continue; }
-      if (next === -1) { level++; state = 3; out += ch; } else if (next === -2) { level--; state = level > 0 ? 3 : 0; out += ch; } else if (next === -3) out += '[^\\r\\n]';
-      else out += '(?<![\\r\\n])(?=\\r|$)';
+      let piece = ch;
+      if (next >= 0) state = next;
+      else if (next === -1) { level++; state = 3; } else if (next === -2) { level--; state = level > 0 ? 3 : 0; } else {
+        piece = next === -3 ? '[^\\r\\n]' : '(?<![\\r\\n])(?=\\r|$)';
+        if (!replaced.includes(ch)) replaced.push(ch);
+      }
+      out += piece;
+      for (let k = 0; k < piece.length; k++) from.push(i);
+      i += ch.length;
     }
+    if (info) Object.assign(info, { from, replaced });
     return out;
   }
 

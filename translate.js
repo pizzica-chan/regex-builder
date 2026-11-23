@@ -228,8 +228,22 @@
     const D = global.RegexDialects;
     if (dialect === 'js') throw new Error('JavaScript はそのまま動かす');
     // サクラエディタ本体は、. と $ を置き換えてから bregonig.dll に渡す（dialects.js の sakuraEditorPattern）
-    if (dialect === 'sakura') src = D.sakuraEditorPattern(src);
-    const { ast, groupCount } = RE.parse(src, flags, dialect);
+    const written = src;
+    const edit = {};
+    if (dialect === 'sakura') src = D.sakuraEditorPattern(src, edit);
+    let parsed;
+    try {
+      parsed = RE.parse(src, flags, dialect);
+    } catch (e) {
+      if (src === written || !(e instanceof RE.RegexParseError)) throw e;
+      // 書いたままでも誤りなら、その誤りを書いた位置で知らせる
+      RE.parse(written, flags, dialect);
+      // 置き換えたために誤りになった（(?<=a$) など）。位置は、置き換える前の正規表現の位置にする
+      const how = edit.replaced.map((c) => (c === '.' ? '. を [^\\r\\n] に' : '$ を (?<![\\r\\n])(?=\\r|$) に')).join('、');
+      const pos = e.pos < edit.from.length ? edit.from[e.pos] : written.length;
+      throw new RE.RegexParseError(`${e.message}（サクラエディタ本体は、${how}置き換えてから探すため）`, pos);
+    }
+    const { ast, groupCount } = parsed;
     const asciiCase = D.asciiCaseOnly(dialect);
     const forced = D.forcedFlags(dialect);
     const notes = new Set();
