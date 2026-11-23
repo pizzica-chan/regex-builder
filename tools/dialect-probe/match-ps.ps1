@@ -1,7 +1,7 @@
 ﻿# cases.json の各正規表現を、PowerShell が動いている .NET の Regex で動かし、一致した位置（UTF-16 単位）を JSON で出す。
 # i のときは RegexOptions.IgnoreCase を付け、付けないときは何も付けずに Regex を作る。
 # -Check を付けると、-match（i のとき）、-cmatch（i でないとき）、Select-String の結果が、ここで作った Regex の結果と同じになるかを確かめる。
-# PowerShell 7.7 と Windows PowerShell 5.1 で、253 の事例のすべてが同じになった。
+# PowerShell 7.7 と Windows PowerShell 5.1 で、262 の事例のすべてが同じになった。
 # 使い方: pwsh -NoProfile -File match-ps.ps1 cases.json [-Check]
 param([Parameter(Mandatory = $true)][string]$CasesPath, [switch]$Check)
 

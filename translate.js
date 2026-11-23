@@ -361,6 +361,8 @@
 
     // ---------- 2 回目: 書き出す ----------
     const wordClass = `[${D.set('word', dialect)}]`;
+    // C# の \b と \B は、\w には一致しない U+200C と U+200D（ゼロ幅非接合子と接合子）も単語の文字として扱う（実際の結果）
+    const boundaryClass = dialect === 'cs' ? `[${D.set('word', dialect)}\\u{200c}\\u{200d}]` : wordClass;
     const dotEx = D.dotExcludes(dialect);
 
     function setBody(kind) {
@@ -390,8 +392,8 @@
         case 'strStart': return '(?<![^])';
         case 'strEnd': return atEnd;
         case 'strEndNl': return beforeFinal;
-        case 'wordb': return `(?:(?<=${wordClass})(?!${wordClass})|(?<!${wordClass})(?=${wordClass}))`;
-        case 'nonwordb': return `(?:(?<=${wordClass})(?=${wordClass})|(?<!${wordClass})(?!${wordClass}))`;
+        case 'wordb': return `(?:(?<=${boundaryClass})(?!${boundaryClass})|(?<!${boundaryClass})(?=${boundaryClass}))`;
+        case 'nonwordb': return `(?:(?<=${boundaryClass})(?=${boundaryClass})|(?<!${boundaryClass})(?!${boundaryClass}))`;
         // GNU の \< と \>（単語の始まりと終わり）
         case 'wordStart': return `(?<!${wordClass})(?=${wordClass})`;
         case 'wordEnd': return `(?<=${wordClass})(?!${wordClass})`;
@@ -677,7 +679,11 @@
           const g = groups.get(n.index);
           if (g) {
             const inside = g.start < n.start && n.start < g.end;
-            const before = n.start < g.start;
+            // 後読みの中は右から左へ照らし合わせる（C# も JavaScript も同じ）。同じ後読みの中で参照より左にあるグループは、
+            // 参照のあとに調べるので、参照する時点では値が入っていない。右にあるグループは、先に調べるので値が入っている（実際の結果）
+            const lb = ctx.behindRange;
+            const inLb = lb && g.start >= lb[0] && g.end <= lb[1];
+            const before = inLb ? g.end <= n.start : n.start < g.start;
             const repeated = repeats.some((q) => q.start <= Math.min(g.start, n.start) && q.end >= Math.max(g.end, n.end));
             if ((dialect === 'sakura' && inside) || ((inside || before) && !repeated)) return '(?!)';
           }
@@ -693,8 +699,8 @@
         case 'group': {
           let c = n.kind === 'modifier' ? withFlags(ctx, n.modOn, n.modOff) : ctx;
           // 後読みの中は、JavaScript が右から左へ照らし合わせる。先読みの中では、また左から右へ照らし合わせる
-          if (/lookbehind/.test(n.kind)) c = { ...c, behind: true };
-          else if (/lookahead/.test(n.kind)) c = { ...c, behind: false };
+          if (/lookbehind/.test(n.kind)) c = { ...c, behind: true, behindRange: [n.start, n.end] };
+          else if (/lookahead/.test(n.kind)) c = { ...c, behind: false, behindRange: null };
           const body = emit(n.body, c);
           switch (n.kind) {
             case 'capture': case 'named': return `(${body})`;
