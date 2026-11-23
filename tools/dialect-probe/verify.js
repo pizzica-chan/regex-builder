@@ -71,7 +71,7 @@ for (const p of ['[a-z-[aeiou]]+', '[^a-[b]]+', '[\\w-[\\d]]+', '[[=e=][.-.]]'])
   KNOWN[p] = 'Java とサクラエディタでは入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている';
   KNOWN_LANGS[p] = ['java', 'sakura'];
 }
-for (const p of ['(?i:[[:lower:]])', '(?i:[[:^lower:]])', '(?i:[\\p{L}-[\\p{Lu}]])', '[[:upper:]]']) {
+for (const p of ['(?i:[[:lower:]])', '(?i:[[:^lower:]])', '(?i:[\\p{L}-[\\p{Lu}]])', '[[:upper:]]', '[[:alpha:].]+']) {
   KNOWN[p] = 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている';
   KNOWN_LANGS[p] = ['java'];
 }

@@ -247,8 +247,39 @@
     return packed;
   }
 
+  // サクラエディタ本体の探し方（v2.4.2 の CSearchAgent::SearchWord）。1 行ずつ、行末の改行（CRLF、LF、CR）を含めた文字列で探す。
+  // 探し始める位置は行末の改行の前までに限る。長さ 0 の一致のあとは 1 文字（サロゲートペアは 2 単位）進める
+  function findAllPerLine(source, flags, text, max, groupMap) {
+    const re = compile(source, flags.includes('g') ? flags : `${flags}g`);
+    const global = flags.includes('g');
+    const matches = [];
+    for (const lm of text.matchAll(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g)) {
+      const line = lm[0];
+      const content = line.replace(/(?:\r\n|\r|\n)$/, '').length;
+      let pos = 0;
+      while (pos <= content && matches.length < max) {
+        re.lastIndex = pos;
+        const m = re.exec(line);
+        if (!m) break;
+        const packed = pack(m, groupMap);
+        packed.index += lm.index;
+        if (packed.ranges) packed.ranges = packed.ranges.map((r) => (r ? [r[0] + lm.index, r[1] + lm.index] : null));
+        matches.push(packed);
+        if (!global) return matches;
+        const end = m.index + m[0].length;
+        pos = end > m.index ? end : end + (line.codePointAt(end) > 0xffff ? 2 : 1);
+      }
+      if (matches.length >= max) break;
+    }
+    return matches;
+  }
+
   // lines を渡すと、各行を別々の文字列として調べ、一致したかを lineHits に入れる
   function findAll(source, flags, text, max, lines, groupMap, emptyMode = '', program = null) {
+    if (program && program.perLine) {
+      const lineHits = lines ? findAll(source, flags, '', 0, lines, groupMap).lineHits : null;
+      return { matches: findAllPerLine(source, flags, text, max, groupMap), lineHits };
+    }
     if (program && program.states) {
       try {
         return findAllPosix(program, source, flags, text, max, lines, groupMap);

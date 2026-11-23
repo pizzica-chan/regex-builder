@@ -1366,14 +1366,16 @@
     const beforeFinal = !isJsCtx(ctx) && DL().dollarBeforeFinal(ctx.dialect);
     // grep は 1 行ずつ調べるので、\` と \' も行の先頭と末尾になる
     const posix = !isJsCtx(ctx) && DL().isPosix(ctx.dialect);
+    // サクラエディタ本体は 1 行ずつ、行末の改行を含めて探すので、\A \z \Z も行の先頭と末尾になる（match-core.js の findAllPerLine）
+    const sakura = ctx.dialect === 'sakura';
     switch (node.kind) {
       case 'start': return `${unit}の先頭`;
       case 'end': return unit === '文字列' && beforeFinal ? '文字列の末尾（最後の改行の直前も含む）' : `${unit}の末尾`;
-      case 'strStart': return posix ? '行の先頭（grep は 1 行ずつ調べる）' : '文字列の先頭（複数行のモードでも）';
-      case 'strEnd': return posix ? '行の末尾（grep は 1 行ずつ調べる）' : '文字列の末尾（最後の改行の直前は含まない）';
+      case 'strStart': return posix ? '行の先頭（grep は 1 行ずつ調べる）' : sakura ? '行の先頭（サクラエディタは 1 行ずつ探す）' : '文字列の先頭（複数行のモードでも）';
+      case 'strEnd': return posix ? '行の末尾（grep は 1 行ずつ調べる）' : sakura ? '行の終わり（行末に改行があれば、その改行のあと。サクラエディタは 1 行ずつ、行末の改行を含めて探す）' : '文字列の末尾（最後の改行の直前は含まない）';
       case 'wordStart': return '単語の始まり';
       case 'wordEnd': return '単語の終わり';
-      case 'strEndNl': return '文字列の末尾（最後の改行の直前も含む）';
+      case 'strEndNl': return sakura ? '行の末尾（行末の改行の直前も含む。サクラエディタは 1 行ずつ探す）' : '文字列の末尾（最後の改行の直前も含む）';
       case 'wordb': return '単語の区切り';
       default: return '単語の区切りではない位置';
     }

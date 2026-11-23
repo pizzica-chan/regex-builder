@@ -49,8 +49,9 @@ public static class Breg {
         }
     }
 
-    // すべての一致の位置（UTF-16 単位の [開始, 終了]）。書き方の誤りなら null。options はサクラエディタと同じく km（と i）
-    public static int[][] MatchAll(string pattern, string options, string text) {
+    // すべての一致の位置（UTF-16 単位の [開始, 終了]）。書き方の誤りなら null。options はサクラエディタと同じく km（と i）。
+    // 探し始める位置は limit まで（サクラエディタ本体は、行末の改行の前までしか探し始めない）
+    public static int[][] MatchAll(string pattern, string options, string text, int limit) {
         IntPtr rx = IntPtr.Zero;
         var msg = new StringBuilder(256);
         IntPtr buf = Marshal.StringToHGlobalUni(text);
@@ -58,7 +59,7 @@ public static class Breg {
         try {
             IntPtr end = IntPtr.Add(buf, text.Length * 2);
             int pos = 0;
-            while (pos <= text.Length && list.Count < 100) {
+            while (pos <= limit && list.Count < 100) {
                 // 文字列の末尾から探し始めると、BMatchExW が誤りを返す（実際の結果）。そのため、前の一致が末尾で終わったときの、
                 // 末尾の長さ 0 の一致（"a\n" の $ の 2 つ目など）は調べられない。cases.json には、末尾の空の一致を含む事例を入れない
                 if (pos == text.Length && text.Length > 0) break;
@@ -77,6 +78,46 @@ public static class Breg {
             if (rx != IntPtr.Zero) BRegfreeW(rx);
             Marshal.FreeHGlobal(buf);
         }
+    }
+
+    // サクラエディタ本体と同じく、1 行ずつ（行末の改行 CRLF、LF、CR を含めて）探す（v2.4.2 の CSearchAgent::SearchWord）
+    public static int[][] MatchLines(string pattern, string options, string text) {
+        if (Match(pattern, " ") < 0) return null;
+        var list = new System.Collections.Generic.List<int[]>();
+        int start = 0;
+        while (start < text.Length && list.Count < 100) {
+            int e = start;
+            while (e < text.Length && text[e] != '\r' && text[e] != '\n') e++;
+            int content = e - start;
+            if (e < text.Length) e += (text[e] == '\r' && e + 1 < text.Length && text[e + 1] == '\n') ? 2 : 1;
+            int[][] found = MatchAll(pattern, options, text.Substring(start, e - start), content);
+            if (found == null) return null;
+            foreach (var m in found) { if (list.Count < 100) list.Add(new[] { m[0] + start, m[1] + start }); }
+            start = e;
+        }
+        return list.ToArray();
+    }
+
+    // サクラエディタ本体が bregonig.dll に渡す前にする置き換え（v2.4.2 の CBregexp::MakePatternAlternate を写したもの）。
+    // \ の付いていない、文字クラスと \Q…\E の外の . を [^\r\n] に、$ を (?<![\r\n])(?=\r|$) にする。文字クラスの入れ子の深さを数える
+    public static string EditorPattern(string src) {
+        int[,] table = {
+            { 0, -3, -4, 0, 0, 0, -1, 0, 1 }, { 0, 0, 0, 2, 6, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0, 1 },
+            { 3, 3, 3, 3, 3, 3, -1, -2, 4 }, { 3, 3, 3, 5, 3, 3, 3, 3, 3 }, { 3, 3, 3, 3, 3, 3, 3, 3, 4 },
+            { 6, 6, 6, 6, 6, 6, 6, 6, 7 }, { 6, 6, 6, 6, 6, 0, 6, 6, 7 } };
+        // この C# は PowerShell の @" … "@ の中にあるので、$ は `$ と書く
+        const string kinds = ".`$cQE[]\\";
+        int state = 0, level = 0;
+        var sb = new StringBuilder();
+        foreach (char ch in src) {
+            int next = table[state, kinds.IndexOf(ch) + 1];
+            if (next >= 0) { state = next; sb.Append(ch); }
+            else if (next == -1) { level++; state = 3; sb.Append(ch); }
+            else if (next == -2) { level--; state = level > 0 ? 3 : 0; sb.Append(ch); }
+            else if (next == -3) sb.Append(@"[^\r\n]");
+            else sb.Append(@"(?<![\r\n])(?=\r|`$)");
+        }
+        return sb.ToString();
     }
 }
 "@
@@ -120,11 +161,11 @@ if ($Cases) {
     $list = Get-Content -Raw -Encoding UTF8 (Join-Path $here 'cases.json') | ConvertFrom-Json
     $results = @()
     foreach ($c in $list) {
-        # サクラエディタ本体と同じく、文字クラスと \Q…\E の外の . を [^\r\n] に置き換えてから渡す（ヘルプ HLP000089）
-        $p = [regex]::Replace($c.p, '\\Q.*?(?:\\E|$)|\\.|\[(?:\\.|[^\]\\])*\]|\.', { param($m) if ($m.Value -eq '.') { '[^\r\n]' } else { $m.Value } })
+        # サクラエディタ本体と同じく、. と $ を置き換えてから（EditorPattern）、1 行ずつ探す（MatchLines）。
+        # 本体には s フラグに当たる指定がないので、s は使わない（. はどれも [^\r\n] になる）
+        $p = [Breg]::EditorPattern($c.p)
         $opt = 'km' + $(if ($c.f.Contains('i')) { 'i' } else { '' })
-        if ($c.f.Contains('s')) { $p = '(?s)' + $p }
-        $r = [Breg]::MatchAll($p, $opt, $c.s)
+        $r = [Breg]::MatchLines($p, $opt, $c.s)
         if ($r -eq $null) { $results += , 'E' } else { $results += , @($r | ForEach-Object { , @($_[0], $_[1]) }) }
     }
     $json = [ordered]@{ unit = 'utf16'; results = $results } | ConvertTo-Json -Depth 6 -Compress

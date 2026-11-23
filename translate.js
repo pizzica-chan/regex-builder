@@ -227,6 +227,8 @@
     const RE = global.RegexExplain;
     const D = global.RegexDialects;
     if (dialect === 'js') throw new Error('JavaScript はそのまま動かす');
+    // サクラエディタ本体は、. と $ を置き換えてから bregonig.dll に渡す（dialects.js の sakuraEditorPattern）
+    if (dialect === 'sakura') src = D.sakuraEditorPattern(src);
     const { ast, groupCount } = RE.parse(src, flags, dialect);
     const asciiCase = D.asciiCaseOnly(dialect);
     const forced = D.forcedFlags(dialect);
@@ -724,6 +726,8 @@
         notes.add('正規表現が大きいので、テストの欄ではいちばん長い一致ではなく、JavaScript と同じく左から順に試して最初に成り立った一致を出します。');
       }
     }
+    // サクラエディタ本体は 1 行ずつ（行末の改行を含めて）正規表現に渡す。match-core.js の findAllPerLine で、同じように探す
+    if (dialect === 'sakura') program = { perLine: true };
     return { source, flags: jsFlags, groupMap, groupCount, notes: [...notes], program };
 
     // 構文木を、状態の並びにする。状態は c（1 文字を読む。re はその文字に一致する JavaScript の正規表現）、
@@ -858,8 +862,8 @@
           });
           if (n.subtract) walk(n.subtract, ctx);
           break;
-        case 'char': addCaseChar(n.value, ctx); if (n.value.codePointAt(0) > 0xffff) f.astral = true; break;
-        case 'literal': for (const ch of n.value) { addCaseChar(ch, ctx); if (ch.codePointAt(0) > 0xffff) f.astral = true; } break;
+        case 'char': addCaseChar(n.value, ctx); if (n.value.codePointAt(0) > 0xffff) f.astral = true; if (/[\r\n]/.test(n.value)) f.newlineChar = true; break;
+        case 'literal': for (const ch of n.value) { addCaseChar(ch, ctx); if (ch.codePointAt(0) > 0xffff) f.astral = true; } if (/[\r\n]/.test(n.value)) f.newlineChar = true; break;
         case 'uprop':
           f.prop = true;
           if (n.negate) f.astral = true;
@@ -873,7 +877,7 @@
           if (/^non|space/.test(n.kind)) f.crossLine = true;
           break;
         case 'dot': if (!ctx.s) f.dot = true; else { f.dotS = true; f.crossLine = true; } f.astral = true; break;
-        case 'linebreak': f.linebreak = true; break;
+        case 'linebreak': f.linebreak = true; f.newlineChar = true; break;
         case 'posix':
           f.prop = true;
           if (!f.posix.includes(n.name)) f.posix.push(n.name);
@@ -886,6 +890,7 @@
           if ((n.kind === 'start' || n.kind === 'end') && ctx.m) f.lineAnchor = true;
           if (n.kind === 'start' && ctx.m) f.lineCaret = true;
           if ((n.kind === 'start' || n.kind === 'end') && !ctx.m) f.plainAnchor = true;
+          if (/^str/.test(n.kind)) f.strAnchor = true;
           break;
         // 参照する時点でいつも一致しているグループなら、どの言語でも結果は同じ
         case 'backref': {
@@ -1146,6 +1151,19 @@
           reasons.push(D.isPosix(to)
             ? '大文字と小文字を区別しないとき、[:upper:] と [:lower:] が [:alpha:] と同じになります（あ にも一致します）'
             : '大文字と小文字を区別しないとき、[:upper:] と [:lower:] は [:alpha:] と同じになりません');
+        }
+      }
+      // サクラエディタ本体は 1 行ずつ（行末の改行を含めて）探す（match-core.js の findAllPerLine）。POSIX との違いは上の grep の理由で知らせる
+      if ((from === 'sakura') !== (to === 'sakura') && !D.isPosix(from) && !D.isPosix(to)) {
+        if (used.crossLine || used.newlineChar) {
+          reasons.push(to === 'sakura'
+            ? 'サクラエディタは 1 行ずつ（行末の改行を含めて）探すので、改行のあとの文字までは一致しません'
+            : '1 行ずつではなく文字列全体を調べるので、改行のあとの文字まで一致することがあります');
+        }
+        if (used.strAnchor) {
+          reasons.push(to === 'sakura'
+            ? 'サクラエディタは 1 行ずつ探すので、\\A、\\z、\\Z が各行の先頭と末尾に一致します'
+            : '\\A、\\z、\\Z が、各行ではなく文字列全体の先頭と末尾に一致します');
         }
       }
       if (used.canBeEmpty && D.emptyMode(from) !== D.emptyMode(to) && !D.isPosix(from) && !D.isPosix(to)) {
