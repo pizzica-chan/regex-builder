@@ -8,8 +8,12 @@
 
   // ere と bre は POSIX の拡張正規表現と基本正規表現（GNU grep）。書き方が大きく違うので、regex-explain.js の parsePosix で別に読む。
   // FEATURES の表は、ほかの 7 つの言語のためのもの
-  const ALL = ['js', 'python', 'java', 'php', 'cs', 'go', 'sakura', 'ere', 'bre'];
-  const BASE = ALL.filter((d) => d !== 'ere' && d !== 'bre');
+  const ALL = ['js', 'python', 'java', 'php', 'cs', 'ps', 'go', 'sakura', 'ere', 'bre'];
+  // 正規表現の処理系が同じ言語。PowerShell は C# と同じ .NET の Regex を使う（tools/dialect-probe で、同じ結果になることを確かめた）。
+  // 書き方と一致の決まりは、ここに書いた言語の値を使う。違うのは名前とコピーの形だけ
+  const ENGINE = { ps: 'cs' };
+  const eng = (d) => ENGINE[d] || d;
+  const BASE = ALL.filter((d) => d !== 'ere' && d !== 'bre' && !ENGINE[d]);
   const except = (...ids) => BASE.filter((d) => !ids.includes(d));
   const POSIX_DIALECTS = ['ere', 'bre'];
 
@@ -19,6 +23,10 @@
     { id: 'java', name: 'Java', engine: 'Java 21 の java.util.regex（Eclipse の検索・置換も同じ）' },
     { id: 'php', name: 'PHP', engine: 'PHP 8.3 の preg_* 関数（PCRE2 10.42、u 修飾子あり）' },
     { id: 'cs', name: 'C#', engine: '.NET 7 の System.Text.RegularExpressions' },
+    {
+      id: 'ps', name: 'PowerShell', engine: 'PowerShell 7.7 の -match・-replace・-split・Select-String など（.NET 11 の System.Text.RegularExpressions）',
+      note: '-match などは初めから大文字と小文字を区別しません（i フラグを付けたときと同じ）。区別するときは -cmatch などを使います。',
+    },
     { id: 'go', name: 'Go', engine: 'Go 1.27 の regexp（RE2）' },
     { id: 'sakura', name: 'サクラエディタ', engine: 'サクラエディタ 2.4 の bregonig.dll 4.20（Onigmo 6.2.0）' },
     { id: 'ere', name: 'POSIX ERE', engine: 'GNU grep の grep -E（POSIX の拡張正規表現と、GNU 独自の書き方）' },
@@ -427,6 +435,13 @@
         const opts = [f('i') && 'RegexOptions.IgnoreCase', f('m') && 'RegexOptions.Multiline', f('s') && 'RegexOptions.Singleline'].filter(Boolean);
         return `new Regex(@"${src.replace(/"/g, '""')}"${opts.length ? `, ${opts.join(' | ')}` : ''})`;
       }
+      case 'ps': {
+        // -match は大文字と小文字を区別せず、-cmatch は区別する。m と s は、演算子に指定がないので、(?ms) のように先頭に書く。
+        // '…' の中の ' は 2 つ重ねる。PowerShell は ‘ ’ ‚ ‛ も ' と同じに扱うので、これらも重ねる（実際の結果）
+        const inline = `${f('m') ? 'm' : ''}${f('s') ? 's' : ''}`;
+        const body = ((inline ? `(?${inline})` : '') + src).replace(/['‘-‛]/g, '$&$&');
+        return `$text ${f('i') ? '-match' : '-cmatch'} '${body}'`;
+      }
       case 'go': {
         const inline = `${f('i') ? 'i' : ''}${f('m') ? 'm' : ''}${f('s') ? 's' : ''}`;
         const body = (inline ? `(?${inline})` : '') + src;
@@ -466,23 +481,27 @@
     LIST,
     ids: ALL,
     get: (id) => byId[id] || byId.js,
+    // 処理系が同じ言語の id（PowerShell なら C#）。regex-explain.js と translate.js は、この id で書き方と一致の決まりを選ぶ
+    engine: eng,
+    // 言語の id を空白で区切って並べたもの（'python cs'）に、この言語か、処理系が同じ言語が入っているか
+    inList: (list, dialect) => list.split(' ').some((d) => d === dialect || d === eng(dialect)),
     // 「〜では」の前に置く名前。英字で終わる名前のあとには空白を入れる（「Java では」「サクラエディタでは」）
     subject: (id) => {
       const name = (byId[id] || byId.js).name;
       return /[A-Za-z#]$/.test(name) ? `${name} ` : name;
     },
-    can: (dialect, feature) => (FEATURES[feature] || []).includes(dialect),
-    lookbehind: (dialect) => LOOKBEHIND[dialect] || null,
-    set: (kind, dialect) => (typeof SETS[kind] === 'string' ? SETS[kind] : SETS[kind][dialect]),
-    dotExcludes: (dialect) => DOT_EXCLUDES[dialect],
-    dollarBeforeFinal: (dialect) => DOLLAR_BEFORE_FINAL[dialect],
-    lineBreaks: (dialect) => LINE_BREAKS[dialect],
-    caretNotAtEnd: (dialect) => CARET_NOT_AT_END.includes(dialect),
-    emptyMode: (dialect) => EMPTY_MODE[dialect] || '',
-    repeatMax: (dialect) => REPEAT_MAX[dialect] || Infinity,
-    atomicLinebreak: (dialect) => ATOMIC_LINEBREAK.includes(dialect),
-    asciiCaseOnly: (dialect) => ASCII_CASE_ONLY.includes(dialect),
-    codeUnits: (dialect) => CODE_UNITS.includes(dialect),
+    can: (dialect, feature) => (FEATURES[feature] || []).includes(eng(dialect)),
+    lookbehind: (dialect) => LOOKBEHIND[eng(dialect)] || null,
+    set: (kind, dialect) => (typeof SETS[kind] === 'string' ? SETS[kind] : SETS[kind][eng(dialect)]),
+    dotExcludes: (dialect) => DOT_EXCLUDES[eng(dialect)],
+    dollarBeforeFinal: (dialect) => DOLLAR_BEFORE_FINAL[eng(dialect)],
+    lineBreaks: (dialect) => LINE_BREAKS[eng(dialect)],
+    caretNotAtEnd: (dialect) => CARET_NOT_AT_END.includes(eng(dialect)),
+    emptyMode: (dialect) => EMPTY_MODE[eng(dialect)] || '',
+    repeatMax: (dialect) => REPEAT_MAX[eng(dialect)] || Infinity,
+    atomicLinebreak: (dialect) => ATOMIC_LINEBREAK.includes(eng(dialect)),
+    asciiCaseOnly: (dialect) => ASCII_CASE_ONLY.includes(eng(dialect)),
+    codeUnits: (dialect) => CODE_UNITS.includes(eng(dialect)),
     // POSIX の正規表現（grep）。いちばん左のいちばん長い一致を選び、1 行ずつ調べる（match-core.js の findAllPosix）
     posixKnown: (c) => !POSIX_UNKNOWN_RE.test(c),
     posixUnknown: POSIX_UNKNOWN,
@@ -493,17 +512,17 @@
       return within(0, 0x7f) || within(0x3041, 0x3093) || within(0x30a1, 0x30f6);
     },
     isPosix: (dialect) => POSIX_DIALECTS.includes(dialect),
-    unicodeDigit: (dialect) => SETS.digit[dialect] !== ASCII_DIGIT,
-    unicodeWord: (dialect) => SETS.word[dialect] !== ASCII_WORD,
-    propToJs,
-    canonicalProp,
+    unicodeDigit: (dialect) => SETS.digit[eng(dialect)] !== ASCII_DIGIT,
+    unicodeWord: (dialect) => SETS.word[eng(dialect)] !== ASCII_WORD,
+    propToJs: (name, dialect) => propToJs(name, eng(dialect)),
+    canonicalProp: (name, dialect) => canonicalProp(name, eng(dialect)),
     // Java と C# は、\p{Han} のような用字の名前だけの書き方を受け付けない（実際に書き方の誤りになった）
-    bareScriptInvalid: (name, dialect) => ['java', 'cs'].includes(dialect) && SCRIPT_NAMES.includes(name),
-    posixToJs,
+    bareScriptInvalid: (name, dialect) => ['java', 'cs'].includes(eng(dialect)) && SCRIPT_NAMES.includes(name),
+    posixToJs: (name, dialect) => posixToJs(name, eng(dialect)),
     sakuraEditorPattern,
     flags: (dialect) => (dialect === 'js' ? FLAG_SETS.js : FLAG_SETS.other)
-      .filter((f) => !(FORCED_FLAGS[dialect] || '').includes(f) && !(NO_EFFECT_FLAGS[dialect] || '').includes(f)),
-    forcedFlags: (dialect) => FORCED_FLAGS[dialect] || '',
+      .filter((f) => !(FORCED_FLAGS[eng(dialect)] || '').includes(f) && !(NO_EFFECT_FLAGS[eng(dialect)] || '').includes(f)),
+    forcedFlags: (dialect) => FORCED_FLAGS[eng(dialect)] || '',
     codeSnippet,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

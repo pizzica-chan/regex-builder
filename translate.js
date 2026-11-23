@@ -244,6 +244,8 @@
       throw new RE.RegexParseError(`${e.message}（サクラエディタ本体は、${how}置き換えてから探すため）`, pos);
     }
     const { ast, groupCount } = parsed;
+    // ここから先は、処理系が同じ言語（PowerShell は C#）の id で置き換え方を選ぶ。誤りの文言は、上の parse が選んだ言語の名前で出す
+    dialect = D.engine(dialect);
     const asciiCase = D.asciiCaseOnly(dialect);
     const forced = D.forcedFlags(dialect);
     const notes = new Set();
@@ -1015,19 +1017,22 @@
   // from の言語で書いた正規表現を、ほかの各言語で使うとどうなるかを返す。
   // 各要素は { dialect, status: 'same' | 'minor' | 'differs' | 'error', reasons: [...] }。
   // minor は、あまり使わない文字（U+0085 など）でだけ結果が変わるとき
-  function portability(src, flags, from) {
+  function portability(src, flags, fromId) {
     const RE = global.RegexExplain;
     const D = global.RegexDialects;
-    const base = RE.parse(src, flags, from);
+    const base = RE.parse(src, flags, fromId);
+    // 書き方と一致の決まりは、処理系が同じ言語（PowerShell は C#）の id で比べる。言語の名前と結果の dialect は、選んだ言語の id にする
+    const from = D.engine(fromId);
     const fromFlags = flags + D.forcedFlags(from);
     const used = usedFeatures(base.ast, fromFlags);
     const out = [];
-    for (const to of D.ids) {
-      if (to === from) continue;
+    for (const toId of D.ids) {
+      if (toId === fromId) continue;
+      const to = D.engine(toId);
       const reasons = [];
       const minor = []; // あまり使わない文字でだけ結果が変わる違い
-      const name = D.get(to).name;
-      const sub = D.subject(to);
+      const name = D.get(toId).name;
+      const sub = D.subject(toId);
       // フラグ。i m s はどの言語にもある。u と y は JavaScript だけ
       const toFlags = [...flags].filter((f) => 'gims'.includes(f) || to === 'js').join('');
       if (from === 'js' && flags.includes('y')) reasons.push('y フラグ（今の位置からだけ探す）に当たるものがありません');
@@ -1044,10 +1049,10 @@
             throw new Error(`JavaScript では書き方の誤りになります（${e.message}）`);
           }
         }
-        parsed = RE.parse(src, toFlags, to);
+        parsed = RE.parse(src, toFlags, toId);
       } catch (e) {
         const msg = to === 'js' && e instanceof RE.RegexParseError ? `JavaScript では${e.message}` : e.message;
-        out.push({ dialect: to, status: 'error', reasons: [msg] });
+        out.push({ dialect: toId, status: 'error', reasons: [msg] });
         continue;
       }
       if (shape(parsed.ast) !== shape(base.ast)) {
@@ -1196,7 +1201,7 @@
         reasons.push('名前付きのグループと名前なしのグループを混ぜたときの、グループの番号の付け方が違います');
       }
       const status = reasons.length ? 'differs' : minor.length ? 'minor' : 'same';
-      out.push({ dialect: to, status, reasons: [...reasons, ...minor] });
+      out.push({ dialect: toId, status, reasons: [...reasons, ...minor] });
     }
     return out;
   }

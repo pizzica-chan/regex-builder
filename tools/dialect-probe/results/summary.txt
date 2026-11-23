@@ -3,78 +3,79 @@ python  Python 3.13.14 re
 java    Java 21.0.13 java.util.regex
 php     PHP 8.3.9 preg (PCRE2 10.42 2022-12-12)
 cs      .NET 7.0.20 System.Text.RegularExpressions
+ps      PowerShell 7.7.0 / .NET 11.0.0
 go      Go go1.27.4 regexp (RE2)
 sakura  Sakura Editor bregonig bregonig.dll Ver.4.20 with Onigmo 6.2.0
 
-probe                  js     python java   php    cs     go     sakura
-named-angle            T      E      T      T      T      T      T     
-named-p                E      T      E      T      E      T      T     
-named-quote            E      E      E      T      T      E      T     
-kref-angle             T      E      T      T      T      E      T     
-pref                   E      T      E      T      E      E      T     
-unmatched-backref      T      F      F      F      F      E      F     
-forward-backref        T      E      F      F      F      E      F     
-lookbehind-var         T      E      T      E      T      E      E     
-lookbehind-alt         T      E      T      T      T      E      T     
-lookbehind-bounded     T      E      T      E      T      E      E     
-atomic                 E      T      T      T      T      E      T     
-atomic-fail            E      F      F      F      F      E      F     
-possessive             E      T      T      T      E      E      T     
-possessive-fail        E      F      F      F      E      E      F     
-anchor-A               F      T      T      T      T      T      T     
-anchor-z               F      E      T      T      T      T      T     
-anchor-z-nl            F      E      F      F      F      F      F     
-anchor-Z-nl            F      F      T      T      T      E      T     
-dollar-nl              F      T      T      T      T      F      T     
-dollar-crlf            F      F      T      F      F      F      F     
-dollar-m-cr            E      F      T      F      F      F      F     
-caret-m-cr             E      F      T      F      F      F      F     
-inline-i-start         E      T      T      T      T      T      T     
-inline-i-middle        E      E      T      T      T      T      T     
-modifier-group         E      T      T      T      T      T      T     
-ci-unicode             E      T      F      T      T      T      T     
-ci-fullwidth           E      T      F      T      T      T      T     
-dot-cr                 F      T      F      T      T      T      T     
-dot-u2028              F      T      F      T      T      T      T     
-dot-u85                T      T      F      T      T      T      T     
-dot-astral             F      T      T      T      F      T      T     
-dot-hiragana           T      T      T      T      T      T      T     
-brace-nomin            F      T      E      F      F      F      F     
-brace-nomin-literal    T      F      E      T      T      T      T     
-brace-open             T      T      E      T      T      T      T     
-class-empty-neg        T      E      E      E      E      E      E     
-class-empty            F      T      T      T      T      T      T     
-class-range-set        T      E      E      E      E      E      E     
-posix                  F      F      T      T      F      T      T     
-prop-L                 F      E      T      T      T      T      T     
-prop-Han               F      E      E      T      E      T      T     
-prop-IsHan             F      E      T      E      E      E      E     
-prop-script            F      E      T      T      E      E      E     
-prop-Hiragana          F      E      E      T      E      T      T     
-esc-u4                 T      T      T      E      T      E      F     
-esc-ubrace             F      E      E      E      E      E      F     
-esc-xbrace             F      E      T      T      E      T      T     
-esc-x2                 T      T      T      T      T      T      E     
-esc-cA                 T      E      T      T      T      E      T     
-esc-octal              T      T      T      T      T      T      E     
-esc-0                  T      T      E      T      T      T      E     
-esc-o-brace            F      E      E      T      E      E      T     
-esc-h                  F      E      T      T      E      E      F     
-esc-R                  F      E      T      T      E      E      T     
-esc-identity-q         T      E      E      E      E      E      T     
-esc-slash              T      T      T      T      T      T      T     
-esc-dash               T      T      T      T      T      T      T     
-quote-QE               F      E      T      T      E      T      T     
-comment                E      T      E      T      T      E      T     
-dup-names              E      E      E      E      T      T      T     
-lazy-brace             T      T      T      T      T      T      T     
-nested-quant           E      E      E      E      E      E      T     
-bracket-literal        T      T      T      T      T      T      T     
-brace-literal          T      T      T      T      T      T      T     
-wordb-hiragana         F      T      F      T      T      F      T     
-class-sub              F      F      F      F      F      F      F     
-class-sub-a            F      F      T      F      F      F      T     
-class-nested           F      F      T      F      F      F      T     
+probe                  js     python java   php    cs     ps     go     sakura
+named-angle            T      E      T      T      T      T      T      T     
+named-p                E      T      E      T      E      E      T      T     
+named-quote            E      E      E      T      T      T      E      T     
+kref-angle             T      E      T      T      T      T      E      T     
+pref                   E      T      E      T      E      E      E      T     
+unmatched-backref      T      F      F      F      F      F      E      F     
+forward-backref        T      E      F      F      F      F      E      F     
+lookbehind-var         T      E      T      E      T      T      E      E     
+lookbehind-alt         T      E      T      T      T      T      E      T     
+lookbehind-bounded     T      E      T      E      T      T      E      E     
+atomic                 E      T      T      T      T      T      E      T     
+atomic-fail            E      F      F      F      F      F      E      F     
+possessive             E      T      T      T      E      E      E      T     
+possessive-fail        E      F      F      F      E      E      E      F     
+anchor-A               F      T      T      T      T      T      T      T     
+anchor-z               F      E      T      T      T      T      T      T     
+anchor-z-nl            F      E      F      F      F      F      F      F     
+anchor-Z-nl            F      F      T      T      T      T      E      T     
+dollar-nl              F      T      T      T      T      T      F      T     
+dollar-crlf            F      F      T      F      F      F      F      F     
+dollar-m-cr            E      F      T      F      F      F      F      F     
+caret-m-cr             E      F      T      F      F      F      F      F     
+inline-i-start         E      T      T      T      T      T      T      T     
+inline-i-middle        E      E      T      T      T      T      T      T     
+modifier-group         E      T      T      T      T      T      T      T     
+ci-unicode             E      T      F      T      T      T      T      T     
+ci-fullwidth           E      T      F      T      T      T      T      T     
+dot-cr                 F      T      F      T      T      T      T      T     
+dot-u2028              F      T      F      T      T      T      T      T     
+dot-u85                T      T      F      T      T      T      T      T     
+dot-astral             F      T      T      T      F      F      T      T     
+dot-hiragana           T      T      T      T      T      T      T      T     
+brace-nomin            F      T      E      F      F      F      F      F     
+brace-nomin-literal    T      F      E      T      T      T      T      T     
+brace-open             T      T      E      T      T      T      T      T     
+class-empty-neg        T      E      E      E      E      E      E      E     
+class-empty            F      T      T      T      T      T      T      T     
+class-range-set        T      E      E      E      E      E      E      E     
+posix                  F      F      T      T      F      F      T      T     
+prop-L                 F      E      T      T      T      T      T      T     
+prop-Han               F      E      E      T      E      E      T      T     
+prop-IsHan             F      E      T      E      E      E      E      E     
+prop-script            F      E      T      T      E      E      E      E     
+prop-Hiragana          F      E      E      T      E      E      T      T     
+esc-u4                 T      T      T      E      T      T      E      F     
+esc-ubrace             F      E      E      E      E      E      E      F     
+esc-xbrace             F      E      T      T      E      E      T      T     
+esc-x2                 T      T      T      T      T      T      T      E     
+esc-cA                 T      E      T      T      T      T      E      T     
+esc-octal              T      T      T      T      T      T      T      E     
+esc-0                  T      T      E      T      T      T      T      E     
+esc-o-brace            F      E      E      T      E      E      E      T     
+esc-h                  F      E      T      T      E      E      E      F     
+esc-R                  F      E      T      T      E      E      E      T     
+esc-identity-q         T      E      E      E      E      E      E      T     
+esc-slash              T      T      T      T      T      T      T      T     
+esc-dash               T      T      T      T      T      T      T      T     
+quote-QE               F      E      T      T      E      E      T      T     
+comment                E      T      E      T      T      T      E      T     
+dup-names              E      E      E      E      T      T      T      T     
+lazy-brace             T      T      T      T      T      T      T      T     
+nested-quant           E      E      E      E      E      E      E      T     
+bracket-literal        T      T      T      T      T      T      T      T     
+brace-literal          T      T      T      T      T      T      T      T     
+wordb-hiragana         F      T      F      T      T      T      F      T     
+class-sub              F      F      F      F      F      F      F      F     
+class-sub-a            F      F      T      F      F      F      F      T     
+class-nested           F      F      T      F      F      F      F      T     
 
 == \d
   js          10文字  U+0030-U+0039
@@ -82,6 +83,7 @@ class-nested           F      F      T      F      F      F      T
   java        10文字  U+0030-U+0039
   php        370文字  U+0030-U+0039 U+0660-U+0669 U+06F0-U+06F9 U+07C0-U+07C9 U+0966-U+096F U+09E6-U+09EF U+0A66-U+0A6F U+0AE6-U+0AEF …
   cs         370文字  U+0030-U+0039 U+0660-U+0669 U+06F0-U+06F9 U+07C0-U+07C9 U+0966-U+096F U+09E6-U+09EF U+0A66-U+0A6F U+0AE6-U+0AEF …
+  ps         370文字  U+0030-U+0039 U+0660-U+0669 U+06F0-U+06F9 U+07C0-U+07C9 U+0966-U+096F U+09E6-U+09EF U+0A66-U+0A6F U+0AE6-U+0AEF …
   go          10文字  U+0030-U+0039
   sakura     370文字  U+0030-U+0039 U+0660-U+0669 U+06F0-U+06F9 U+07C0-U+07C9 U+0966-U+096F U+09E6-U+09EF U+0A66-U+0A6F U+0AE6-U+0AEF …
           ０    あ    漢    全角SP VT   U+1C NEL  NBSP BOM  CR   LS   ‿    ◌̀   ²    
@@ -90,6 +92,7 @@ class-nested           F      F      T      F      F      F      T
   java    -    -    -    -    -    -    -    -    -    -    -    -    -    -    
   php     ○    -    -    -    -    -    -    -    -    -    -    -    -    -    
   cs      ○    -    -    -    -    -    -    -    -    -    -    -    -    -    
+  ps      ○    -    -    -    -    -    -    -    -    -    -    -    -    -    
   go      -    -    -    -    -    -    -    -    -    -    -    -    -    -    
   sakura  ○    -    -    -    -    -    -    -    -    -    -    -    -    -    
 == \w
@@ -98,6 +101,7 @@ class-nested           F      F      T      F      F      F      T
   java        63文字  U+0030-U+0039 U+0041-U+005A U+005F U+0061-U+007A
   php      49701文字  U+0030-U+0039 U+0041-U+005A U+005F U+0061-U+007A U+00AA U+00B2-U+00B3 U+00B5 U+00B9-U+00BA …
   cs       50409文字  U+0030-U+0039 U+0041-U+005A U+005F U+0061-U+007A U+00AA U+00B5 U+00BA U+00C0-U+00D6 …
+  ps       50419文字  U+0030-U+0039 U+0041-U+005A U+005F U+0061-U+007A U+00AA U+00B5 U+00BA U+00C0-U+00D6 …
   go          63文字  U+0030-U+0039 U+0041-U+005A U+005F U+0061-U+007A
   sakura   50632文字  U+0030-U+0039 U+0041-U+005A U+005F U+0061-U+007A U+00AA U+00B2-U+00B3 U+00B5 U+00B9-U+00BA …
           ０    あ    漢    全角SP VT   U+1C NEL  NBSP BOM  CR   LS   ‿    ◌̀   ²    
@@ -106,6 +110,7 @@ class-nested           F      F      T      F      F      F      T
   java    -    -    -    -    -    -    -    -    -    -    -    -    -    -    
   php     ○    ○    ○    -    -    -    -    -    -    -    -    -    -    ○    
   cs      ○    ○    ○    -    -    -    -    -    -    -    -    ○    ○    -    
+  ps      ○    ○    ○    -    -    -    -    -    -    -    -    ○    ○    -    
   go      -    -    -    -    -    -    -    -    -    -    -    -    -    -    
   sakura  ○    ○    ○    -    -    -    -    -    -    -    -    ○    ○    ○    
 == \s
@@ -114,6 +119,7 @@ class-nested           F      F      T      F      F      F      T
   java         6文字  U+0009-U+000D U+0020
   php         26文字  U+0009-U+000D U+0020 U+0085 U+00A0 U+1680 U+180E U+2000-U+200A U+2028-U+2029 …
   cs          25文字  U+0009-U+000D U+0020 U+0085 U+00A0 U+1680 U+2000-U+200A U+2028-U+2029 U+202F …
+  ps          25文字  U+0009-U+000D U+0020 U+0085 U+00A0 U+1680 U+2000-U+200A U+2028-U+2029 U+202F …
   go           5文字  U+0009-U+000A U+000C-U+000D U+0020
   sakura      25文字  U+0009-U+000D U+0020 U+0085 U+00A0 U+1680 U+2000-U+200A U+2028-U+2029 U+202F …
           ０    あ    漢    全角SP VT   U+1C NEL  NBSP BOM  CR   LS   ‿    ◌̀   ²    
@@ -122,6 +128,7 @@ class-nested           F      F      T      F      F      F      T
   java    -    -    -    -    ○    -    -    -    -    ○    -    -    -    -    
   php     -    -    -    ○    ○    -    ○    ○    -    ○    ○    -    -    -    
   cs      -    -    -    ○    ○    -    ○    ○    -    ○    ○    -    -    -    
+  ps      -    -    -    ○    ○    -    ○    ○    -    ○    ○    -    -    -    
   go      -    -    -    -    -    -    -    -    -    ○    -    -    -    -    
   sakura  -    -    -    ○    ○    -    ○    ○    -    ○    ○    -    -    -    
 == .
@@ -130,6 +137,7 @@ class-nested           F      F      T      F      F      F      T
   java     63483文字  U+0000-U+0009 U+000B-U+000C U+000E-U+0084 U+0086-U+2027 U+202A-U+D7FF U+E000-U+FFFF
   php      63487文字  U+0000-U+0009 U+000B-U+D7FF U+E000-U+FFFF
   cs       63487文字  U+0000-U+0009 U+000B-U+D7FF U+E000-U+FFFF
+  ps       63487文字  U+0000-U+0009 U+000B-U+D7FF U+E000-U+FFFF
   go       63487文字  U+0000-U+0009 U+000B-U+D7FF U+E000-U+FFFF
   sakura   63487文字  U+0000-U+0009 U+000B-U+D7FF U+E000-U+FFFF
           ０    あ    漢    全角SP VT   U+1C NEL  NBSP BOM  CR   LS   ‿    ◌̀   ²    
@@ -138,6 +146,7 @@ class-nested           F      F      T      F      F      F      T
   java    ○    ○    ○    ○    ○    ○    -    ○    ○    -    -    ○    ○    ○    
   php     ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   cs      ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
+  ps      ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   go      ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   sakura  ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
 == (?s).
@@ -146,6 +155,7 @@ class-nested           F      F      T      F      F      F      T
   java     63488文字  U+0000-U+D7FF U+E000-U+FFFF
   php      63488文字  U+0000-U+D7FF U+E000-U+FFFF
   cs       63488文字  U+0000-U+D7FF U+E000-U+FFFF
+  ps       63488文字  U+0000-U+D7FF U+E000-U+FFFF
   go       63488文字  U+0000-U+D7FF U+E000-U+FFFF
   sakura   63488文字  U+0000-U+D7FF U+E000-U+FFFF
           ０    あ    漢    全角SP VT   U+1C NEL  NBSP BOM  CR   LS   ‿    ◌̀   ²    
@@ -154,5 +164,6 @@ class-nested           F      F      T      F      F      F      T
   java    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   php     ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   cs      ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
+  ps      ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   go      ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    
   sakura  ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    ○    

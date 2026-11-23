@@ -268,7 +268,8 @@
     return { ast, groupCount, dialect };
   }
 
-  // dialect は dialects.js の言語の id（js、python、java、php、cs、go、sakura）。言語ごとに受け付ける書き方を変える
+  // dialect は dialects.js の言語の id（js、python、java、php、cs、ps、go、sakura）。言語ごとに受け付ける書き方を変える。
+  // 処理系が同じ言語（PowerShell は C#）は、その言語の id に直して読む。誤りの文言には、選んだ言語の名前を出す
   // opts.scan が true のときは、グループの数を数えるためだけに読む（C# の \12 を後方参照か8進数か決めるのに使う）
   function parse(src, flags, dialect = 'js', opts = {}) {
     const D = global.RegexDialects;
@@ -277,6 +278,8 @@
     const isJs = dialect === 'js';
     const can = (feature) => !isJs && D.can(dialect, feature);
     const dsub = D ? D.subject(dialect) : 'JavaScript ';
+    const dname = D ? D.get(dialect).name : 'JavaScript';
+    if (D) dialect = D.engine(dialect);
 
     let i = 0;
     let groupCount = 0;
@@ -407,7 +410,7 @@
       if (src[i] === '?') { lazy = true; i++; }
       else if (src[i] === '+' && !isJs) {
         if (can('possessive')) { possessive = true; i++; }
-        else if (dialect === 'cs') err('C# では *+ のような、戻って試し直さない繰り返し（強欲な繰り返し）は使えません');
+        else if (dialect === 'cs') err(`${dsub}では *+ のような、戻って試し直さない繰り返し（強欲な繰り返し）は使えません`);
         else err(`${dsub}では、繰り返しの記号を重ねられません`);
       }
       let node = { type: 'quant', min, max, lazy, possessive, target: atom, start: atom.start, qStart, end: i };
@@ -879,7 +882,7 @@
           if (D.bareScriptInvalid(m[2], dialect)) {
             err(dialect === 'java'
               ? `Java では \\p{${m[2]}} は使えません。\\p{Is${m[2]}} と書きます`
-              : `C# では \\p{${m[2]}} は使えません。\\p{IsHiragana} のようなブロックの名前を使います`, start);
+              : `${dsub}では \\p{${m[2]}} は使えません。\\p{IsHiragana} のようなブロックの名前を使います`, start);
           }
           const js = D.propToJs(m[2], dialect);
           if (!js) {
@@ -931,7 +934,7 @@
         if (dialect === 'cs' && items.length && src.startsWith('-[', i)) {
           i++;
           const sub = parseClass();
-          if (src[i] !== ']') err('C# の文字クラスの引き算（-[…]）のあとには、文字を書けません。引き算は文字クラスの最後に書きます', sub.end);
+          if (src[i] !== ']') err(`${dname} の文字クラスの引き算（-[…]）のあとには、文字を書けません。引き算は文字クラスの最後に書きます`, sub.end);
           i++;
           return { type: 'class', negate, items, subtract: sub, start, end: i };
         }

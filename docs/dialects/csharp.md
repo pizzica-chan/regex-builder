@@ -13,6 +13,8 @@
   - [文字のエスケープ](https://learn.microsoft.com/en-us/dotnet/standard/base-types/character-escapes-in-regular-expressions)
   - [量指定子](https://learn.microsoft.com/en-us/dotnet/standard/base-types/quantifiers-in-regular-expressions)
 
+PowerShell も同じ .NET の正規表現を使います。PowerShell だけの違い（大文字と小文字を初めから区別しないことなど）は [powershell.md](powershell.md) にまとめています。
+
 ## オプション
 
 | オプション | 正規表現の中での書き方 | 意味 |

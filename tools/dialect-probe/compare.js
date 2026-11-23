@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const dir = process.argv[2];
-const langs = ['js', 'python', 'java', 'php', 'cs', 'go', 'sakura'].filter((l) => fs.existsSync(path.join(dir, `${l}.json`)));
+const langs = ['js', 'python', 'java', 'php', 'cs', 'ps', 'go', 'sakura'].filter((l) => fs.existsSync(path.join(dir, `${l}.json`)));
 const read = (l) => JSON.parse(fs.readFileSync(path.join(dir, `${l}.json`), 'utf8').replace(/^﻿/, ''));
 const data = Object.fromEntries(langs.map((l) => [l, read(l)]));
 

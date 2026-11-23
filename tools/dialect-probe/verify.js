@@ -17,7 +17,7 @@ for (const f of ['dialects.js', 'regex-explain.js', 'translate.js', 'match-core.
 const { RegexTranslate } = ctx;
 
 const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'cases.json'), 'utf8'));
-const langs = ['python', 'java', 'php', 'cs', 'go', 'sakura', 'ere', 'bre'];
+const langs = ['python', 'java', 'php', 'cs', 'ps', 'go', 'sakura', 'ere', 'bre'];
 
 const toCp = (s, unit) => (pos) => {
   if (unit === 'cp') return pos;
@@ -46,12 +46,12 @@ function ours(c, lang) {
 const KNOWN = {
   '(a)?\\1b': '一致しなかったグループの参照は、この言語では失敗するが、JavaScript では空文字列として一致する（テストの欄で注意を出す）',
   '[[:alpha:]]+': 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている',
-  '😀+': 'C# は絵文字などを 2 文字として数える（テスト文字列に絵文字があると、テストの欄で注意を出す）',
+  '😀+': 'C# と PowerShell は絵文字などを 2 文字として数える（テスト文字列に絵文字があると、テストの欄で注意を出す）',
   '^.$': '同上',
 };
 KNOWN['\\pN'] = 'サクラエディタは \\pN を誤りにしないが、Unicode の性質としては読まない。このツールは \\p{N} と書くよう知らせる';
 KNOWN['\\PL'] = '同上';
-// Python・Java・C# の、大文字と小文字を区別しない後方参照は、言語ごとの決まりで比べる。テストの欄は JavaScript の i フラグで比べる（注意を出す）
+// Python・Java・C#・PowerShell の、大文字と小文字を区別しない後方参照は、言語ごとの決まりで比べる。テストの欄は JavaScript の i フラグで比べる（注意を出す）
 KNOWN['(В)\\1'] = 'この言語の大文字と小文字を区別しない後方参照は ᲀ と В を別とみなすが、テストの欄は JavaScript の i フラグで比べる（テストの欄で注意を出す）';
 // GNU grep -i の後方参照は、ȿ（2 バイト）のように大文字（Ȿ、3 バイト）にするとバイト数が増える 18 文字で、行によって結果が変わる。
 // (ȿ)\1 は「ȿȿ」だけの行には一致しないが、「aȿȿ」の中の ȿȿ には一致する。(.).\1 は「ⱾⱾȿ」に一致しないが、決して一致しない |q を足した
@@ -65,7 +65,7 @@ KNOWN['\\x{1F600}??'] = 'Java は長さ 0 の一致のあと UTF-16 の 1 単位
 // サクラエディタの調べる道具（probe-sakura.ps1）は、文字列の末尾から探せないので、前の一致が末尾で終わったあとの、末尾の長さ 0 の一致を調べられない。
 // ツールの結果の最後がその一致で、それを除くと同じときだけ、わかっている違いとする（その直前の長さ 0 の一致は、末尾に U+0001 を足した事例で確かめている）
 const SAKURA_END = 'サクラエディタの調べる道具は、文字列の末尾の長さ 0 の一致を調べられない（probe-sakura.ps1 のコメント）。それを除くと同じ';
-const KNOWN_LANGS = { '(ȿ)\\1': ['ere', 'bre'], '(.).\\1': ['ere', 'bre', 'java'], '(.).\\1|q': ['java'], '(В)\\1': ['python', 'java', 'cs'], '\\x{1F600}??': ['java'], '😀+': ['cs'], '^.$': ['cs'], '\\pN': ['sakura'], '\\PL': ['sakura'] };
+const KNOWN_LANGS = { '(ȿ)\\1': ['ere', 'bre'], '(.).\\1': ['ere', 'bre', 'java'], '(.).\\1|q': ['java'], '(В)\\1': ['python', 'java', 'cs', 'ps'], '\\x{1F600}??': ['java'], '😀+': ['cs', 'ps'], '^.$': ['cs', 'ps'], '\\pN': ['sakura'], '\\PL': ['sakura'] };
 // C# の文字クラスの引き算（[a-z-[aeiou]]）は、Java とサクラエディタでは入れ子の文字クラスとして読まれる
 for (const p of ['[a-z-[aeiou]]+', '[^a-[b]]+', '[\\w-[\\d]]+', '[[=e=][.-.]]']) {
   KNOWN[p] = 'Java とサクラエディタでは入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている';

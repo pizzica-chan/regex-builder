@@ -96,7 +96,7 @@
   const FLAG_TIPS = {
     g: { label: 'すべての一致を探す', desc: '最初の一致で止めずに、文字列の中の一致をすべて探します。付けないと、最初の1つだけを見つけます。「行ごとに判定する」の判定には使いません。', cmp: ['\\d+', '10 個、20 個、30 個', '', 'g'] },
     i: { label: '大文字と小文字を区別しない', desc: '英字の大文字と小文字を同じ文字として扱います。cat は Cat や CAT にも一致し、[a-z] は大文字にも一致します。', cmp: ['cat', 'cat Cat CAT', 'g', 'gi'] },
-    m: { label: '各行の先頭と末尾', desc: '^ と $ を文字列全体の先頭と末尾だけでなく、各行の先頭と末尾にも一致させます。付けないと、^ は文字列の最初、$ は文字列の最後にだけ一致します（Python・Java・PHP・C# の $ は、文字列の最後の改行の直前にも一致します）。', cmp: ['^\\d+', '1. りんご\n2. みかん\n3. ぶどう', 'g', 'gm'] },
+    m: { label: '各行の先頭と末尾', desc: '^ と $ を文字列全体の先頭と末尾だけでなく、各行の先頭と末尾にも一致させます。付けないと、^ は文字列の最初、$ は文字列の最後にだけ一致します（Python・Java・PHP・C#・PowerShell の $ は、文字列の最後の改行の直前にも一致します）。', cmp: ['^\\d+', '1. りんご\n2. みかん\n3. ぶどう', 'g', 'gm'] },
     s: { label: '. を改行にも一致させる', desc: '. を、改行を含むどんな文字にも一致させます。付けないと . は改行に一致しないので、行をまたいで一致させられません。', cmp: ['「.+」', '「1行目\n2行目」', 'g', 'gs'] },
     u: { label: 'Unicode モード', desc: '\\p{…} で文字の種類（漢字やひらがななど）を指定できるようになり、絵文字のような文字も1文字として数えます。書き方の誤りを厳しく調べるので、付けないと通る書き方がエラーになることがあります。', cmp: ['\\p{Script=Han}+', '日本語の文章', 'g', 'gu'] },
     y: { label: '位置を固定して探す', desc: '前の一致の終わり（最初は文字列の先頭）の位置でだけ一致を調べ、その先は探しません。一致が途切れたところで止まるので、先頭から続く部分だけを取り出せます。「行ごとに判定する」の判定には使いません。', cmp: ['[A-Z]\\d', 'A1B2C3 D4', 'g', 'gy'] },
@@ -123,11 +123,11 @@
 
   // ---------- 部品の表示 ----------
 
-  // 言語ごとに違う値。〜By の鍵は、空白で区切った言語の id（'python php'）
+  // 言語ごとに違う値。〜By の鍵は、空白で区切った言語の id（'python php'）。処理系が同じ言語（PowerShell は C#）にも同じ値を使う
   function forDialect(item, field) {
     const by = item[`${field}By`];
     if (by) {
-      for (const [k, v] of Object.entries(by)) if (k.split(' ').includes(dialect)) return v;
+      for (const [k, v] of Object.entries(by)) if (Dialects.inList(k, dialect)) return v;
     }
     const v = item[field];
     // POSIX の方言では、ほかの言語の書き方の部品と例を、POSIX の書き方に置き換える
@@ -174,8 +174,8 @@
     }
     return out;
   }
-  const availableIn = (item) => (!item.only || item.only.split(' ').includes(dialect)) &&
-    (!item.except || !item.except.split(' ').includes(dialect));
+  const availableIn = (item) => (!item.only || Dialects.inList(item.only, dialect)) &&
+    (!item.except || !Dialects.inList(item.except, dialect));
   const resolveItem = (item) => ({
     ...item,
     label: forDialect(item, 'label'),
@@ -1181,7 +1181,7 @@
     const sel = $('preset');
     sel.length = 1;
     PRESETS.forEach((p, n) => {
-      if (p.except && p.except.split(' ').includes(dialect)) return;
+      if (p.except && Dialects.inList(p.except, dialect)) return;
       try {
         window.RegexExplain.parse(forDialect(p, 'pattern'), p.flags, dialect);
       } catch (_) {
@@ -1206,7 +1206,7 @@
     // 英字で終わる名前（「… の re」）のあとには空白を入れる
     const engine = /[A-Za-z0-9)]$/.test(d.engine) ? `${d.engine} ` : d.engine;
     // テストの欄で JavaScript に置き換えて動かすことは書かない。結果がずれる場面だけ、テストの欄に注意を出す
-    $('dialect-engine').textContent = `${engine}の書き方と意味に合わせています。`;
+    $('dialect-engine').textContent = `${engine}の書き方と意味に合わせています。${d.note || ''}`;
     $('copy-literal').title = isJs() ? '/…/flags の形でコピー' : `${d.name}のコードの形でコピー`;
     buildPalette();
     buildPresets();

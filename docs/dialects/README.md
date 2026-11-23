@@ -1,6 +1,6 @@
 # 正規表現の方言の資料
 
-このツールが対応する 9 つの方言について、正規表現の仕様をまとめた資料です。どの資料も次の 2 つを元にしています（POSIX の資料は、実際の結果だけから書いています）。
+このツールが対応する 10 の方言について、正規表現の仕様をまとめた資料です。どの資料も次の 2 つを元にしています（POSIX の資料は、実際の結果だけから書いています）。
 
 - 公式の資料（言語やライブラリの公式のドキュメント）。各ファイルの「公式の資料」にリンクがあります。2026-11-23 に読みました
 - 手元の処理系で実際に動かした結果。調べ方と結果は [tools/dialect-probe](../../tools/dialect-probe/) にあります
@@ -14,13 +14,14 @@
 | [java.md](java.md) | Java（Eclipse の検索・置換も同じ） | Java 21 の `java.util.regex` |
 | [php.md](php.md) | PHP | PHP 8.3 の `preg_*`（PCRE2 10.42） |
 | [csharp.md](csharp.md) | C#（.NET） | .NET 7 の `System.Text.RegularExpressions` |
+| [powershell.md](powershell.md) | PowerShell | PowerShell 7.7（.NET 11）の `-match`、`Select-String` など |
 | [go.md](go.md) | Go | Go 1.27 の `regexp`（RE2） |
 | [sakura.md](sakura.md) | サクラエディタ | サクラエディタ 2.4.2 の `bregonig.dll` 4.20（Onigmo 6.2.0） |
 | [posix.md](posix.md) | POSIX ERE と POSIX BRE（GNU grep） | GNU grep 3.11 の `grep -E` と `grep`（Ubuntu 24.04、ロケールは ja_JP.UTF-8） |
 
 ## 違いの早見表
 
-POSIX の ERE と BRE は、書き方も一致の選び方（いちばん長い一致）も大きく違うので、表には入れず、[posix.md](posix.md) にまとめています。
+POSIX の ERE と BRE は、書き方も一致の選び方（いちばん長い一致）も大きく違うので、表には入れず、[posix.md](posix.md) にまとめています。PowerShell は C# と同じ .NET の正規表現を使い、どの項目も C# と同じなので、表には入れていません（[powershell.md](powershell.md)）。
 
 ○ は使える、× は書き方の誤りになる、という意味です。表の値は [tools/dialect-probe/results/summary.txt](../../tools/dialect-probe/results/summary.txt) と、[tools/dialect-probe/cases.json](../../tools/dialect-probe/cases.json) の事例を各言語の処理系で動かした実際の結果から書いています。
 
