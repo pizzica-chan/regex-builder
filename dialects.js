@@ -435,13 +435,9 @@
         const opts = [f('i') && 'RegexOptions.IgnoreCase', f('m') && 'RegexOptions.Multiline', f('s') && 'RegexOptions.Singleline'].filter(Boolean);
         return `new Regex(@"${src.replace(/"/g, '""')}"${opts.length ? `, ${opts.join(' | ')}` : ''})`;
       }
-      case 'ps': {
-        // -match は大文字と小文字を区別せず、-cmatch は区別する。m と s は、演算子に指定がないので、(?ms) のように先頭に書く。
-        // '…' の中の ' は 2 つ重ねる。PowerShell は ‘ ’ ‚ ‛ も ' と同じに扱うので、これらも重ねる（実際の結果）
-        const inline = `${f('m') ? 'm' : ''}${f('s') ? 's' : ''}`;
-        const body = ((inline ? `(?${inline})` : '') + src).replace(/['‘-‛]/g, '$&$&');
-        return `$text ${f('i') ? '-match' : '-cmatch'} '${body}'`;
-      }
+      case 'ps':
+        // -match は大文字と小文字を区別せず、-cmatch は区別する
+        return `$text ${f('i') ? '-match' : '-cmatch'} ${psPattern(src, flags)}`;
       case 'go': {
         const inline = `${f('i') ? 'i' : ''}${f('m') ? 'm' : ''}${f('s') ? 's' : ''}`;
         const body = (inline ? `(?${inline})` : '') + src;
@@ -473,6 +469,122 @@
   // Java や Go の "…" の文字列
   function cString(s) {
     return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+
+  // PowerShell の '…' に入れた正規表現。m と s は、演算子と Select-String に指定がないので、(?ms) のように先頭に書く。
+  // '…' の中の ' は 2 つ重ねる。PowerShell は ‘ ’ ‚ ‛ も ' と同じに扱うので、これらも重ねる（実際の結果）
+  function psPattern(src, flags) {
+    const inline = `${flags.includes('m') ? 'm' : ''}${flags.includes('s') ? 's' : ''}`;
+    return `'${((inline ? `(?${inline})` : '') + src).replace(/['‘-‛]/g, '$&$&')}'`;
+  }
+
+  // ---------- サンプルコード ----------
+
+  // 文字列を、その言語の文字列リテラルにする。special は 1 文字ごとの書き方。
+  // 制御文字、U+0085、U+2028、U+2029、U+FEFF は、見えないか、ソースの中にそのまま書けない言語があるので、hex の形にする
+  const hidden = (cp) => cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) || cp === 0x2028 || cp === 0x2029 || cp === 0xfeff;
+  function literal(s, open, close, special, hex) {
+    let out = '';
+    for (const ch of s) {
+      const cp = ch.codePointAt(0);
+      if (ch in special) out += special[ch];
+      else if (hidden(cp)) out += hex(cp);
+      else out += ch;
+    }
+    return open + out + close;
+  }
+  const hex2 = (cp) => cp.toString(16).padStart(2, '0');
+  const hex4 = (cp) => cp.toString(16).padStart(4, '0');
+  const BS = '\\';
+  const C_SPECIAL = { [BS]: BS + BS, '"': `${BS}"`, '\n': `${BS}n`, '\r': `${BS}r`, '\t': `${BS}t` };
+  const TEXT = {
+    js: (s) => literal(s, "'", "'", { ...C_SPECIAL, '"': '"', "'": `${BS}'` }, (cp) => `${BS}u${hex4(cp)}`),
+    python: (s) => literal(s, "'", "'", { ...C_SPECIAL, '"': '"', "'": `${BS}'` }, (cp) => (cp < 0x100 ? `${BS}x${hex2(cp)}` : `${BS}u${hex4(cp)}`)),
+    // Java は、ソースを読む前に \u の書き方を文字に置き換えるので、\u000a は改行になって文字列が切れる。0xff までは 8 進数で書く
+    java: (s) => literal(s, '"', '"', C_SPECIAL, (cp) => (cp < 0x100 ? `${BS}${cp.toString(8).padStart(3, '0')}` : `${BS}u${hex4(cp)}`)),
+    // "…" の中では $ が変数になるので、\$ にする
+    php: (s) => literal(s, '"', '"', { ...C_SPECIAL, $: `${BS}$` }, (cp) => `${BS}u{${hex2(cp)}}`),
+    cs: (s) => literal(s, '"', '"', C_SPECIAL, (cp) => `${BS}u${hex4(cp)}`),
+    // "…" の中の書き方は ` で始める。PowerShell は “ ” „ ‟ も " と同じに扱うので、` を付ける
+    ps: (s) => literal(s, '"', '"', {
+      '`': '``', '"': '`"', '“': '`“', '”': '`”', '„': '`„', '‟': '`‟', $: '`$', '\n': '`n', '\r': '`r', '\t': '`t',
+    }, (cp) => `\`u{${hex2(cp)}}`),
+    // Go の \x は 1 バイトなので、0x80 以上は \u で書く。U+FEFF はソースの途中に書くと誤りになる
+    go: (s) => literal(s, '"', '"', C_SPECIAL, (cp) => (cp < 0x80 ? `${BS}x${hex2(cp)}` : `${BS}u${hex4(cp)}`)),
+    // bash の $'…'（前の $ は呼ぶ側で付ける）
+    sh: (s) => literal(s, "'", "'", { [BS]: BS + BS, "'": `${BS}'`, '\t': `${BS}t`, '\r': `${BS}r` }, (cp) => (cp < 0x80 ? `${BS}x${hex2(cp)}` : `${BS}u${hex4(cp)}`)),
+  };
+
+  // 今の正規表現とフラグで text を調べ、一致した部分を 1 行に 1 つずつ出すプログラム。g がないときは、最初の一致だけを出す。
+  // groups はグループの数で、1 以上なら、グループ 1 の取り出し方をコメントで添える。
+  // サクラエディタはプログラムがないので、検索の手順を返す。返す値は { code, kind: 'code' | 'steps' }
+  function sampleProgram(src, flags, text, dialect, groups = 0) {
+    const all = flags.includes('g');
+    const plain = flags.replace('g', '');
+    const note = (comment, how) => (groups > 0 ? ` ${comment} ${how} でグループ 1 を取り出せます` : '');
+    const lines = (...ls) => ({ kind: 'code', code: ls.flat().filter((l) => l !== null).join('\n') });
+    switch (dialect) {
+      case 'js': {
+        const re = new RegExp(src, flags).toString();
+        return lines(`const re = ${re};`, `const text = ${TEXT.js(text)};`, all
+          ? ['for (const m of text.matchAll(re)) {', `  console.log(m[0]);${note('//', 'm[1]')}`, '}']
+          : ['const m = re.exec(text);', `console.log(m ? m[0] : '一致なし');${note('//', 'm[1]')}`]);
+      }
+      case 'python':
+        return lines('import re', '', `pattern = ${codeSnippet(src, plain, dialect)}`, `text = ${TEXT.python(text)}`, all
+          ? ['for m in pattern.finditer(text):', `    print(m.group())${note(' #', 'm.group(1)')}`]
+          : ['m = pattern.search(text)', `print(m.group() if m else '一致なし')${note(' #', 'm.group(1)')}`]);
+      case 'java':
+        return lines('import java.util.regex.Matcher;', 'import java.util.regex.Pattern;', '', 'public class Main {',
+          '    public static void main(String[] args) {',
+          `        Pattern pattern = ${codeSnippet(src, plain, dialect)};`,
+          `        String text = ${TEXT.java(text)};`,
+          '        Matcher m = pattern.matcher(text);', all
+            ? ['        while (m.find()) {', `            System.out.println(m.group());${note('//', 'm.group(1)')}`, '        }']
+            : [`        System.out.println(m.find() ? m.group() : "一致なし");${note('//', 'm.group(1)')}`],
+          '    }', '}');
+      case 'php':
+        return lines('<?php', `$pattern = ${codeSnippet(src, plain, dialect)};`, `$text = ${TEXT.php(text)};`, all
+          ? ['preg_match_all($pattern, $text, $matches, PREG_SET_ORDER);', 'foreach ($matches as $m) {',
+            `    echo $m[0], PHP_EOL;${note('//', '$m[1]')}`, '}']
+          : [`echo preg_match($pattern, $text, $m) ? $m[0] : '一致なし', PHP_EOL;${note('//', '$m[1]')}`]);
+      case 'cs':
+        return lines('using System;', 'using System.Text.RegularExpressions;', '',
+          `var regex = ${codeSnippet(src, plain, dialect)};`, `var text = ${TEXT.cs(text)};`, all
+            ? ['foreach (Match m in regex.Matches(text))', '{', `    Console.WriteLine(m.Value);${note('//', 'm.Groups[1].Value')}`, '}']
+            : ['var m = regex.Match(text);', `Console.WriteLine(m.Success ? m.Value : "一致なし");${note('//', 'm.Groups[1].Value')}`]);
+      case 'ps':
+        // すべての一致は Select-String -AllMatches で取り出す。-match は最初の一致だけを $Matches に入れる
+        return lines(`$text = ${TEXT.ps(text)}`, all
+          ? [`foreach ($m in ($text | Select-String -Pattern ${psPattern(src, plain)} -AllMatches${plain.includes('i') ? '' : ' -CaseSensitive'}).Matches) {`,
+            `    $m.Value${note('#', '$m.Groups[1].Value')}`, '}']
+          : [`if (${codeSnippet(src, plain, dialect)}) { $Matches[0] } else { '一致なし' }${note('#', '$Matches[1]')}`]);
+      case 'go':
+        return lines('package main', '', 'import (', '\t"fmt"', '\t"regexp"', ')', '', 'func main() {',
+          `\tre := ${codeSnippet(src, plain, dialect)}`, `\ttext := ${TEXT.go(text)}`, all
+            ? ['\tfor _, m := range re.FindAllStringSubmatch(text, -1) {', `\t\tfmt.Println(m[0])${note('//', 'm[1]')}`, '\t}']
+            : ['\tif m := re.FindStringSubmatch(text); m != nil {', `\t\tfmt.Println(m[0])${note('//', 'm[1]')}`,
+              '\t} else {', '\t\tfmt.Println("一致なし")', '\t}'],
+          '}');
+      case 'ere': case 'bre': {
+        // printf で 1 行ずつ渡し、grep -o で一致した部分を 1 行に 1 つずつ出す。grep は 1 行ずつ調べ、どの行の一致も出す。
+        // 見えない文字を含む行は、bash の $'…' の書き方にする
+        const rows = text.split('\n');
+        if (rows.length > 1 && rows[rows.length - 1] === '') rows.pop();
+        const quoted = rows.map((r) => ([...r].some((ch) => hidden(ch.codePointAt(0)))
+          ? `$${TEXT.sh(r)}`
+          : `'${r.replace(/'/g, "'\\''")}'`)).join(' ');
+        return lines(`printf '%s\\n' ${quoted} | ${codeSnippet(src, plain, dialect).replace(/^grep /, 'grep -o ')}`);
+      }
+      case 'sakura':
+        return {
+          kind: 'steps',
+          code: ['1. 検索（Ctrl+F）を開き、「正規表現」にチェックを入れます', '2. 検索する文字列に次の正規表現を入れて、検索します', '',
+            codeSnippet(src, plain, dialect)].join('\n'),
+        };
+      default:
+        return null;
+    }
   }
 
   const byId = Object.fromEntries(LIST.map((d) => [d.id, d]));
@@ -524,5 +636,6 @@
       .filter((f) => !(FORCED_FLAGS[eng(dialect)] || '').includes(f) && !(NO_EFFECT_FLAGS[eng(dialect)] || '').includes(f)),
     forcedFlags: (dialect) => FORCED_FLAGS[eng(dialect)] || '',
     codeSnippet,
+    sampleProgram,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

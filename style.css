@@ -657,3 +657,21 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
   .porta li { grid-template-columns: 1fr auto; }
   .porta-why { grid-column: 1 / -1; }
 }
+
+/* テストの欄の、今の言語のコード例 */
+.sample { margin-top: 16px; }
+.sample > summary { cursor: pointer; font-weight: 600; font-size: 0.95rem; }
+.sample-head { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; }
+.sample-head .hint { flex: 1; margin: 0; }
+.sample-code {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--lit-bg);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  tab-size: 4;
+}

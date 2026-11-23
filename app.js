@@ -583,6 +583,80 @@
       '</ul>';
   }
 
+  // ---------- コード例 ----------
+
+  // コード例に入れるテスト文字列の長さの上限。超えるときと空のときは、例の文字列を入れる
+  const MAX_SAMPLE_TEXT = 1000;
+  const SAMPLE_TEXT = '調べる文字列';
+  const SAMPLE_OPEN_KEY = 'regex-builder:sample-open';
+  let sampleCode = '';
+
+  function renderSample(src, flags) {
+    const d = Dialects.get(dialect);
+    const posix = Dialects.isPosix(dialect);
+    const sakura = dialect === 'sakura';
+    $('sample-title').textContent = `${sakura ? '検索の手順' : posix ? 'コマンドの例' : 'コード例'}（${d.name}）`;
+    sampleCode = '';
+    let groups = 0;
+    let valid = !!src;
+    if (valid) {
+      try {
+        groups = window.RegexExplain.parse(src, flags, dialect).groupCount;
+      } catch (_) {
+        valid = isJs() && !!lastRe; // JavaScript は、自前の解析が対応していない書き方でも、ブラウザが受け付ければ出す
+      }
+    }
+    if (valid && isJs() && !lastRe) valid = false;
+    let result = null;
+    let text = testEl.value;
+    let textNote = '';
+    if (!text) {
+      text = SAMPLE_TEXT;
+      textNote = 'テスト文字列が空なので、例の文字列を入れています。';
+    } else if (text.length > MAX_SAMPLE_TEXT) {
+      text = SAMPLE_TEXT;
+      textNote = `テスト文字列が ${MAX_SAMPLE_TEXT} 文字を超えるので、例の文字列を入れています。`;
+    }
+    if (valid) {
+      try {
+        result = Dialects.sampleProgram(src, flags, text, dialect, groups);
+      } catch (_) {
+        result = null;
+      }
+    }
+    $('sample-copy').disabled = !result;
+    $('sample-code').textContent = result ? result.code : '';
+    $('sample-code').parentElement.hidden = !result;
+    if (!result) {
+      $('sample-hint').textContent = '正しい正規表現を入れると、ここに出ます。';
+      return;
+    }
+    sampleCode = result.code;
+    let hint;
+    if (sakura) {
+      hint = 'サクラエディタで今の正規表現を使って検索する手順です。フラグは (?i) のように正規表現の先頭に書いています。';
+    } else if (posix) {
+      hint = 'テスト文字列を 1 行ずつ grep に渡し、一致した部分を 1 行に 1 つずつ出すコマンドです（bash などのシェルで動かします）。';
+    } else {
+      hint = `今の正規表現とフラグでテスト文字列を調べ、${flags.includes('g') ? '一致した部分を 1 行に 1 つずつ出す' : '最初の一致を出す'}プログラムです。`;
+      if (lineModeEl.checked) hint += '「行ごとに判定する」の判定は入れていません。';
+    }
+    $('sample-hint').textContent = hint + (sakura ? '' : textNote);
+  }
+
+  function setupSample() {
+    const box = $('sample');
+    let saved = null;
+    try { saved = localStorage.getItem(SAMPLE_OPEN_KEY); } catch (_) { /* 保存できない環境では開いた状態で始める */ }
+    box.open = saved !== '0';
+    box.addEventListener('toggle', () => {
+      try { localStorage.setItem(SAMPLE_OPEN_KEY, box.open ? '1' : '0'); } catch (_) { /* 保存できなくても開け閉めは続ける */ }
+    });
+    $('sample-copy').addEventListener('click', () => {
+      if (sampleCode) copy(sampleCode, `${$('sample-title').textContent}をコピーしました`);
+    });
+  }
+
   function renderMeaning(src, flags) {
     renderPortability(src, flags);
     const tree = $('tree');
@@ -1077,6 +1151,7 @@
     // 書き方に誤りがあっても、解析できれば説明を出す
     renderMeaning(src, flags);
     renderMatches(src ? lastRe : null);
+    renderSample(src, flags);
     saveToHash(src, flags);
   }
 
@@ -1307,6 +1382,7 @@
   setupLines();
   setupMatchTable();
   setupTools();
+  setupSample();
   if (!loadFromHash()) {
     const p = PRESETS[3];
     patternEl.value = forDialect(p, 'pattern');
