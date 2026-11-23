@@ -1310,8 +1310,11 @@
     if (it.type === 'uprop') return upropNoun(it, ctx);
     if (it.type === 'posix') {
       const names = !isJsCtx(ctx) && ctx.dialect !== 'go' ? { ...POSIX_NAMES, ...POSIX_NAMES_UNICODE } : POSIX_NAMES;
-      // GNU grep の [:digit:] は 0〜9 だけ（全角数字は [:alnum:] に入る）
-      if (!isJsCtx(ctx) && DL().isPosix(ctx.dialect)) names.digit = POSIX_NAMES.digit;
+      // GNU grep の [:digit:] は 0〜9 だけで、ほかの数字（全角数字など）は [:alpha:] に入る
+      if (!isJsCtx(ctx) && DL().isPosix(ctx.dialect)) {
+        names.digit = POSIX_NAMES.digit;
+        names.alpha = '文字（ひらがなや漢字と、0〜9 以外の数字も含む）';
+      }
       const name = `${names[it.name] || esc(it.name)}（[:${esc(it.name)}:]）`;
       return it.negate ? `${name} 以外` : name;
     }
@@ -1775,6 +1778,13 @@
     m: FLAG_TEXT.m,
     s: FLAG_TEXT.s,
   };
+  // プログラムで動かさない言語の g。grep は -o ですべての一致を出し、サクラエディタは［下検索］で 1 つずつ進む
+  const FLAG_G_POSIX = 'すべての一致を探す（テストの欄の設定。grep にこの指定はないので、コマンドの例では、付けないときは最初の一致だけを出す）';
+  const FLAG_G_BY = {
+    ere: FLAG_G_POSIX,
+    bre: FLAG_G_POSIX,
+    sakura: 'すべての一致を探す（テストの欄の設定。サクラエディタでは、［下検索］を押すたびに次の一致へ進む）',
+  };
 
   function explain(src, flags, dialect = 'js') {
     const { ast, groupCount, dialect: d } = parse(src, flags, dialect);
@@ -1798,10 +1808,10 @@
         sctx = applyFlags(sctx, n.on, n.off);
       }
     }
-    const texts = d === 'js' ? FLAG_TEXT : FLAG_TEXT_OTHER;
+    const texts = d === 'js' ? FLAG_TEXT : { ...FLAG_TEXT_OTHER, g: FLAG_G_BY[d] || FLAG_TEXT_OTHER.g };
     const flagList = [...flags].filter((f) => texts[f]).map((f) => ({ flag: f, text: texts[f] }));
     for (const f of forced) {
-      flagList.push({ flag: f, text: `${FLAG_TEXT[f]}（${global.RegexDialects.get(d).name}では常に有効）` });
+      flagList.push({ flag: f, text: `${FLAG_TEXT[f]}（${global.RegexDialects.subject(d)}では常に有効）` });
     }
     return {
       tree,

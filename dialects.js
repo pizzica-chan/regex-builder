@@ -568,13 +568,13 @@
           '}');
       case 'ere': case 'bre': {
         // printf で 1 行ずつ渡し、grep -o で一致した部分を 1 行に 1 つずつ出す。grep は 1 行ずつ調べ、どの行の一致も出す。
-        // 見えない文字を含む行は、bash の $'…' の書き方にする
+        // 見えない文字を含む行は、bash の $'…' の書き方にする。g がないときは、テストの欄と同じく最初の一致だけを head で出す
         const rows = text.split('\n');
         if (rows.length > 1 && rows[rows.length - 1] === '') rows.pop();
         const quoted = rows.map((r) => ([...r].some((ch) => hidden(ch.codePointAt(0)))
           ? `$${TEXT.sh(r)}`
           : `'${r.replace(/'/g, "'\\''")}'`)).join(' ');
-        return lines(`printf '%s\\n' ${quoted} | ${codeSnippet(src, plain, dialect).replace(/^grep /, 'grep -o ')}`);
+        return lines(`printf '%s\\n' ${quoted} | ${codeSnippet(src, plain, dialect).replace(/^grep /, 'grep -o ')}${all ? '' : ' | head -n 1'}`);
       }
       case 'sakura':
         // 検索のダイアログの項目の名前は、サクラエディタ 2.4.2 のヘルプ（HLP000059）による。

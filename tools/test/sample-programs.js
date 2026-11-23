@@ -104,7 +104,8 @@ function expected(c, src, dialect, text) {
   let found = ctx.MatchCore.findAll(source, flags, text, 100, undefined, null, D.emptyMode(dialect), program).matches.map((m) => m.text);
   // grep -o は長さ 0 の一致を出さない
   if (D.isPosix(dialect)) found = found.filter((m) => m !== '');
-  if (!c.f.includes('g') && !D.isPosix(dialect)) found = found.length ? [found[0]] : ['一致なし'];
+  // g がないときは最初の一致だけ。grep のコマンドは、一致がなければ何も出さない
+  if (!c.f.includes('g')) found = found.length ? [found[0]] : D.isPosix(dialect) ? [] : ['一致なし'];
   return found;
 }
 

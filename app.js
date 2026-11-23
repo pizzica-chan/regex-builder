@@ -87,8 +87,8 @@
   // 部品以外のボタンの説明
   const BUTTON_TIPS = {
     'literal-add': { label: '文字をそのまま入れる', desc: '入力した文字を、そのままの文字として入れます。. や ( のように正規表現で特別な意味を持つ記号には \\ を付けます。', ex: ['example\\.com', 'example.com exampleXcom'] },
-    'class-add': { label: '文字の集まりから 1 文字', code: '[…]', desc: '入力した文字のどれか1文字に一致する部品を入れます。a-z のように - でつなぐと範囲になります。', ex: ['[aeiou]', 'regex'] },
-    'class-neg-add': { label: '文字の集まり以外の 1 文字', code: '[^…]', desc: '入力した文字のどれでもない1文字に一致する部品を入れます。', ex: ['[^aeiou]+', 'regex'] },
+    'class-add': { label: '文字の集まりから 1文字', code: '[…]', desc: '入力した文字のどれか1文字に一致する部品を入れます。a-z のように - でつなぐと範囲になります。', ex: ['[aeiou]', 'regex'] },
+    'class-neg-add': { label: '文字の集まり以外の 1文字', code: '[^…]', desc: '入力した文字のどれでもない1文字に一致する部品を入れます。', ex: ['[^aeiou]+', 'regex'] },
     'rep-add': { label: '回数を指定して繰り返す', code: '{n,m}', desc: '直前の部品を、指定した回数だけ繰り返します。{3} はちょうど3回、{2,4} は2〜4回、{2,} は2回以上です。', ex: ['\\d{2,4}', '1 12 123 12345'] },
   };
 
@@ -633,12 +633,13 @@
     }
     sampleCode = result.code;
     let hint;
+    const found = flags.includes('g') ? '一致した部分を 1 行に 1 つずつ出す' : '最初の一致を出す';
     if (sakura) {
       hint = 'サクラエディタで今の正規表現を使って検索する手順です。';
     } else if (posix) {
-      hint = 'テスト文字列を 1 行ずつ grep に渡し、一致した部分を 1 行に 1 つずつ出すコマンドです（bash などのシェルで動かします）。';
+      hint = `テスト文字列を 1 行ずつ grep に渡し、${found}コマンドです（bash などのシェルで動かします）。`;
     } else {
-      hint = `今の正規表現とフラグでテスト文字列を調べ、${flags.includes('g') ? '一致した部分を 1 行に 1 つずつ出す' : '最初の一致を出す'}プログラムです。`;
+      hint = `今の正規表現とフラグでテスト文字列を調べ、${found}プログラムです。`;
       if (lineModeEl.checked) hint += '「行ごとに判定する」の判定は入れていません。';
     }
     $('sample-hint').textContent = hint + (sakura ? '' : textNote);
