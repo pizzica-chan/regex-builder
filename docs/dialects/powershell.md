@@ -30,7 +30,8 @@ PowerShell 7.7 で、[cases.json](../../tools/dialect-probe/cases.json) の 249 
 
 - 演算子と `Select-String` は `RegexOptions.IgnoreCase` を付けた .NET の Regex と同じ結果になりました。249 の事例のすべてで、`-match`、`-cmatch`、`Select-String -AllMatches` の結果を比べました（`match-ps.ps1 -Check`）。`-replace`、`-split`、`switch -Regex` も、`b` で `aBc` の `B` に一致しました（実際の結果）
 - 演算子には複数行のモード（Multiline）と、`.` を改行にも一致させるモード（Singleline）の指定がありません。`'(?ms)^a.b'` のように、正規表現の先頭に書きます。`-split` だけは `-split 'b', 0, 'Multiline'` のようにオプションを渡せます
-- `$Matches` には、`-match` の最初の一致だけが入ります。すべての一致は `Select-String -AllMatches` か `[regex]::Matches()` で取り出します
+- 大文字と小文字の比べ方は、C# と同じく、カルチャ（言語や地域の設定）で変わります。トルコ語（tr-TR）では、`'I' -match 'i'` が成り立ちません。同じセッションで先に同じ正規表現を使っていると、カルチャを変えても結果が変わりませんでした（実際の結果）。照らし合わせは日本語（ja-JP）の設定で行いました
+- 左辺が文字列 1 つのとき、`$Matches` には `-match` の最初の一致だけが入ります。左辺が配列のときは、一致した要素の配列が返り、`$Matches` には何も入りません（実際の結果）。すべての一致は `Select-String -AllMatches` か `[regex]::Matches()` で取り出します
 
 ## 文字列の書き方
 
