@@ -1,6 +1,6 @@
 /*
  * JavaScript 以外の言語の正規表現を、同じ意味の JavaScript の正規表現（v フラグ）に置き換える。
- * 「試す」の欄と部品の説明の例は、ブラウザの JavaScript で動くので、ここで置き換えてから動かす。
+ * 「テスト」の欄と部品の説明の例は、ブラウザの JavaScript で動くので、ここで置き換えてから動かす。
  *
  * - \d \w \s . ^ $ \b などは、その言語での意味（dialects.js）を、文字クラスと先読み・後読みで書き直す
  * - アトミックグループ (?>X) と強欲な繰り返し X*+ は、(?=(X))\n の形で再現する。
@@ -20,12 +20,35 @@
     return plain(cp) ? ch : `\\u{${hex(cp)}}`;
   };
 
-  // 大文字と小文字を区別しないときに、同じとみなす文字（1 文字になるものだけ）
+  // 大文字と小文字で組になる文字の一覧。toLowerCase と toUpperCase だけでは、k に対するケルビン記号（U+212A）や
+  // s に対する ſ（U+017F）のような組が見つからないので、使うときに一度だけ全部の文字から作る
+  let caseGroups = null;
+  const caseKey = (c) => {
+    const up = c.toUpperCase();
+    const low = ([...up].length === 1 ? up : c).toLowerCase();
+    return [...low].length === 1 ? low : c;
+  };
+  function buildCaseGroups() {
+    caseGroups = new Map();
+    for (let cp = 0; cp <= 0x1ffff; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      const c = String.fromCodePoint(cp);
+      const key = caseKey(c);
+      if (key === c && c.toUpperCase() === c) continue; // 大文字と小文字の区別がない文字
+      if (!caseGroups.has(key)) caseGroups.set(key, new Set([key]));
+      caseGroups.get(key).add(c);
+    }
+  }
+
+  // 大文字と小文字を区別しないときに、同じとみなす文字（1 文字になるものだけ）。
+  // JavaScript の i フラグ（v フラグあり）が同じとみなす文字にそろえる。テストの欄で i フラグを使うときと結果を合わせるため
   function caseVariants(ch, asciiOnly) {
-    if (asciiOnly && !/[A-Za-z]/.test(ch)) return [ch];
-    const out = new Set([ch]);
-    for (const v of [ch.toLowerCase(), ch.toUpperCase()]) if ([...v].length === 1) out.add(v);
-    return [...out];
+    if (asciiOnly) return /[A-Za-z]/.test(ch) ? [...new Set([ch, ch.toLowerCase(), ch.toUpperCase()])] : [ch];
+    if (!caseGroups) buildCaseGroups();
+    const group = caseGroups.get(caseKey(ch));
+    if (!group) return [ch];
+    const same = new RegExp(`^${lit(ch)}$`, 'iv');
+    return [ch, ...[...group].filter((c) => c !== ch && same.test(c))];
   }
 
   // グループの番号ごとに、一致しないまま終わることがあるか（optional）と、グループの終わりの位置（end）
@@ -67,12 +90,19 @@
     let next = 0;
     const groupMap = new Array(groupCount + 1).fill(null);
     const groups = groupInfo(ast);
+    // 正規表現の先頭の (?i) など（コメントを挟んで並んでいてもよい）。あとの「または」の候補にも効くので、正規表現全体に効く
+    const firstSeq = ast.type === 'alt' ? ast.alts[0] : ast;
+    const leading = [];
+    for (const it of firstSeq.type === 'seq' ? firstSeq.items : []) {
+      if (it.type === 'flags') leading.push(it);
+      else if (it.type !== 'comment') break;
+    }
     let scopedCase = false;
     (function walk(n) {
       switch (n.type) {
-        case 'seq': n.items.forEach((it, k) => {
+        case 'seq': n.items.forEach((it) => {
           // 先頭以外の (?i) や、i を外す指定があると、範囲ごとに大文字と小文字を扱う必要がある
-          if (it.type === 'flags' && (k > 0 || n !== ast || /i/.test(it.off)) && /i/.test(it.on + it.off)) scopedCase = true;
+          if (it.type === 'flags' && (!leading.includes(it) || /i/.test(it.off)) && /i/.test(it.on + it.off)) scopedCase = true;
           walk(it);
         }); break;
         case 'alt': n.alts.forEach(walk); break;
@@ -86,7 +116,7 @@
           if (n.index) {
             n.jsIndex = ++next;
             if (groupMap[n.index] == null) groupMap[n.index] = n.jsIndex;
-            else notes.add('同じ名前のグループが 2 つ以上あります。試す欄の表には、最初のグループの値を出します。');
+            else notes.add('同じ名前のグループが 2 つ以上あります。テストの欄の表には、最初のグループの値を出します。');
           }
           walk(n.body);
           break;
@@ -95,8 +125,7 @@
     })(ast);
 
     // 大文字と小文字を区別しない指定が全体に同じように効くなら、JavaScript の i フラグに任せる
-    const leadingFlags = ast.type === 'seq' && ast.items[0] && ast.items[0].type === 'flags' ? ast.items[0] : null;
-    const topI = has('i') || (leadingFlags && leadingFlags.on.includes('i'));
+    const topI = has('i') || leading.some((f) => f.on.includes('i'));
     const useJsI = topI && !scopedCase && !asciiCase;
     if (asciiCase && (topI || scopedCase)) notes.add('Java の大文字と小文字を区別しない指定は、英字（A〜Z、a〜z）だけに効かせています。');
 
@@ -133,7 +162,7 @@
         case 'strEndNl': return beforeFinal;
         case 'wordb': return `(?:(?<=${wordClass})(?!${wordClass})|(?<!${wordClass})(?=${wordClass}))`;
         case 'nonwordb': return `(?:(?<=${wordClass})(?=${wordClass})|(?<!${wordClass})(?!${wordClass}))`;
-        default: throw new Untranslatable('この位置の部品は、試す欄では動かせません');
+        default: throw new Untranslatable('この位置の部品は、テストの欄では動かせません');
       }
     }
 
@@ -155,7 +184,7 @@
             const a = it.from.codePointAt(0);
             const b = it.to.codePointAt(0);
             if (b - a > 5000) {
-              notes.add('大きな範囲の文字クラスでは、大文字と小文字の区別を試す欄で再現できないことがあります。');
+              notes.add('大きな範囲の文字クラスでは、大文字と小文字の区別をテストの欄で再現できないことがあります。');
             } else {
               const extra = new Set();
               for (let cp = a; cp <= b; cp++) {
@@ -176,17 +205,17 @@
         case 'uprop': return prop(it);
         case 'posix': {
           const body = D.posixToJs(it.name, dialect);
-          if (!body) throw new Untranslatable(`POSIX の文字クラス [:${it.name}:] は、試す欄では動かせません`);
-          if (dialect !== 'go') notes.add('POSIX の文字クラス（[:alpha:] など）の範囲は、試す欄では近い範囲で動かしています。');
+          if (!body) throw new Untranslatable(`POSIX の文字クラス [:${it.name}:] は、テストの欄では動かせません`);
+          if (dialect !== 'go') notes.add('POSIX の文字クラス（[:alpha:] など）の範囲は、テストの欄では近い範囲で動かしています。');
           return it.negate ? `[^${body}]` : `[${body}]`;
         }
-        default: throw new Untranslatable('この文字クラスは、試す欄では動かせません');
+        default: throw new Untranslatable('この文字クラスは、テストの欄では動かせません');
       }
     }
 
     function prop(n) {
       const p = D.propToJs(n.value, dialect);
-      if (!p) throw new Untranslatable(`\\p{${n.value}} は、試す欄では動かせません`);
+      if (!p) throw new Untranslatable(`\\p{${n.value}} は、テストの欄では動かせません`);
       if (p.prop) return `${n.negate ? '\\P' : '\\p'}{${p.prop}}`;
       return n.negate ? `[^${p.range}]` : `[${p.range}]`;
     }
@@ -251,9 +280,9 @@
           if (n.missing) return '(?!)';
           const js = groupMap[n.index];
           if (js == null) throw new Untranslatable('参照しているグループが見つかりません');
-          if (ctx.i && !useJsI) notes.add('大文字と小文字を区別しない後方参照は、試す欄では大文字と小文字を区別して比べています。');
+          if (ctx.i && !useJsI) notes.add('大文字と小文字を区別しない後方参照は、テストの欄では大文字と小文字を区別して比べています。');
           if (mayBeUnset(n, groups)) {
-            notes.add('一致しなかったグループを参照すると、この言語では失敗しますが、試す欄では空文字列として一致したものとして扱います。');
+            notes.add('一致しなかったグループを参照すると、この言語では失敗しますが、テストの欄では空文字列として一致したものとして扱います。');
           }
           return `(?:\\${js})`;
         }
@@ -271,14 +300,14 @@
             case 'lookbehind': return `(?<=${body})`;
             case 'neglookbehind': return `(?<!${body})`;
             case 'atomic': return noBacktrack(body, n.jsExtra, ctx);
-            default: throw new Untranslatable('このグループは、試す欄では動かせません');
+            default: throw new Untranslatable('このグループは、テストの欄では動かせません');
           }
         }
         case 'quant': {
           const t = `(?:${emit(n.target, ctx)})${quantText(n)}`;
           return n.possessive ? noBacktrack(t, n.jsExtra, ctx) : t;
         }
-        default: throw new Untranslatable('この部品は、試す欄では動かせません');
+        default: throw new Untranslatable('この部品は、テストの欄では動かせません');
       }
     }
 
@@ -288,12 +317,12 @@
     return { source, flags: jsFlags, groupMap, groupCount, notes: [...notes] };
   }
 
-  // 試す文字列の中身によって出す注意
+  // テスト文字列の中身によって出す注意
   function textNotes(text, dialect) {
     const D = global.RegexDialects;
     const out = [];
     if (D.codeUnits(dialect) && /[\u{10000}-\u{10ffff}]/u.test(text)) {
-      out.push(`${D.get(dialect).name} は絵文字などを 2 文字として数えますが、試す欄では 1 文字として数えます。. や長さの指定を含む一致は、結果が変わることがあります。`);
+      out.push(`${D.get(dialect).name} は絵文字などを 2 文字として数えますが、テストの欄では 1 文字として数えます。. や長さの指定を含む一致は、結果が変わることがあります。`);
     }
     return out;
   }
@@ -302,7 +331,7 @@
 
   // 構文木から、言語によって意味の変わる部品が使われているかを集める
   function usedFeatures(ast, flags) {
-    const f = { digit: false, word: false, space: false, dot: false, dollar: false, lineAnchor: false, backref: false, named: false, numbered: false, caseless: flags.includes('i') };
+    const f = { digit: false, word: false, space: false, dot: false, dollar: false, lineAnchor: false, lineCaret: false, linebreak: false, posix: [], backref: false, named: false, numbered: false, caseless: flags.includes('i') };
     const groups = groupInfo(ast);
     (function walk(n, ctx) {
       switch (n.type) {
@@ -333,10 +362,13 @@
           if (/space/.test(n.kind) && !/[hv]space/.test(n.kind)) f.space = true;
           break;
         case 'dot': if (!ctx.s) f.dot = true; break;
+        case 'linebreak': f.linebreak = true; break;
+        case 'posix': if (!f.posix.includes(n.name)) f.posix.push(n.name); break;
         case 'anchor':
           if (n.kind === 'wordb' || n.kind === 'nonwordb') f.word = true;
           if ((n.kind === 'end' && !ctx.m) || n.kind === 'strEndNl') f.dollar = true;
           if ((n.kind === 'start' || n.kind === 'end') && ctx.m) f.lineAnchor = true;
+          if (n.kind === 'start' && ctx.m) f.lineCaret = true;
           if ((n.kind === 'start' || n.kind === 'end') && !ctx.m) f.plainAnchor = true;
           break;
         // 参照する時点でいつも一致しているグループなら、どの言語でも結果は同じ
@@ -395,7 +427,8 @@
   }
 
   // from の言語で書いた正規表現を、ほかの各言語で使うとどうなるかを返す。
-  // 各要素は { dialect, status: 'same' | 'differs' | 'error', reasons: [...] }
+  // 各要素は { dialect, status: 'same' | 'minor' | 'differs' | 'error', reasons: [...] }。
+  // minor は、あまり使わない文字（U+0085 など）でだけ結果が変わるとき
   function portability(src, flags, from) {
     const RE = global.RegexExplain;
     const D = global.RegexDialects;
@@ -406,6 +439,7 @@
     for (const to of D.ids) {
       if (to === from) continue;
       const reasons = [];
+      const minor = []; // あまり使わない文字でだけ結果が変わる違い
       const name = D.get(to).name;
       const sub = D.subject(to);
       // フラグ。i m s はどの言語にもある。u と y は JavaScript だけ
@@ -441,20 +475,46 @@
       if (used.digit && diff(uni(D.unicodeDigit, from), uni(D.unicodeDigit, to))) {
         reasons.push(D.unicodeDigit(to) ? '\\d が全角数字やほかの言語の数字にも一致します' : '\\d が 0〜9 だけに一致します（全角数字には一致しません）');
       }
+      // 大きな違い（全角の文字や CR など）を先に言い、それがなくても範囲が違えば、めったに使わない文字の違いとして言う
       if (used.word && diff(uni(D.unicodeWord, from), uni(D.unicodeWord, to))) {
         reasons.push(D.unicodeWord(to) ? '\\w と \\b が、ひらがなや漢字も単語の文字として扱います' : '\\w と \\b が、英数字と _ だけを単語の文字として扱います');
+      } else if (used.word && diff(D.set('word', from), D.set('word', to))) {
+        minor.push('\\w と \\b が単語の文字とみなす範囲が少し違います（① や、アクセント記号を組み合わせた文字など）');
       }
       const fullSpace = (d) => !['java', 'go'].includes(d);
       if (used.space && diff(fullSpace(from), fullSpace(to))) {
         reasons.push(fullSpace(to) ? '\\s が全角スペースにも一致します' : '\\s が全角スペースに一致しません');
+      } else if (used.space && diff(D.set('space', from), D.set('space', to))) {
+        minor.push('\\s が一致する空白の範囲が少し違います（垂直タブや U+0085 など、あまり使わない文字）');
       }
       const dotCr = (d) => !D.dotExcludes(d).includes('\\r');
       if (used.dot && diff(dotCr(from), dotCr(to))) {
         reasons.push(dotCr(to) ? '. が CR（\\r）にも一致します' : '. が CR（\\r）に一致しません');
+      } else if (used.dot && diff(D.dotExcludes(from), D.dotExcludes(to))) {
+        minor.push('. が一致しない改行の種類が少し違います（U+0085 や U+2028 など）');
       }
       const beforeFinal = (d) => !!D.dollarBeforeFinal(d);
-      if (used.dollar && !toAll.includes('m') && !fromFlags.includes('m') && diff(beforeFinal(from), beforeFinal(to))) {
-        reasons.push(beforeFinal(to) ? '$ が、文字列の最後の改行の直前にも一致します' : '$ が、文字列の最後の改行の直前には一致しません');
+      if (used.dollar && !toAll.includes('m') && !fromFlags.includes('m')) {
+        if (diff(beforeFinal(from), beforeFinal(to))) {
+          reasons.push(beforeFinal(to) ? '$ が、文字列の最後の改行の直前にも一致します' : '$ が、文字列の最後の改行の直前には一致しません');
+        } else if (diff(D.dollarBeforeFinal(from), D.dollarBeforeFinal(to))) {
+          minor.push('$ が直前に一致する、文字列の最後の改行の種類が違います（CR や U+0085 など）');
+        }
+      }
+      if (used.lineCaret && toAll.includes('m') && fromFlags.includes('m') && diff(D.caretNotAtEnd(from), D.caretNotAtEnd(to))) {
+        reasons.push(D.caretNotAtEnd(to)
+          ? '複数行のモードの ^ が文字列の最後の改行のあと（文字列の末尾）には一致しません'
+          : '複数行のモードの ^ が文字列の最後の改行のあと（文字列の末尾）にも一致します');
+      }
+      if (used.linebreak && diff(D.atomicLinebreak(from), D.atomicLinebreak(to))) {
+        reasons.push(D.atomicLinebreak(to)
+          ? '\\R が CRLF に一致したあと、CR だけに戻って試し直しません（\\R\\n は CRLF に一致しません）'
+          : '\\R が CRLF に一致したあとでも、CR だけに戻って試し直します');
+      }
+      // POSIX の文字クラスとして読まない言語（Python、C#）は、上の「別の意味に読まれます」で知らせる
+      const posixIn = (name, d) => D.can(d, 'posix') && D.posixToJs(name, d);
+      if (used.posix.some((name) => posixIn(name, from) && posixIn(name, to) && diff(D.posixToJs(name, from), D.posixToJs(name, to)))) {
+        reasons.push('[:alpha:] などの POSIX の文字クラスが一致する範囲が違います');
       }
       const mChanges = toAll.includes('m') !== fromFlags.includes('m');
       if ((used.plainAnchor || used.lineAnchor) && mChanges) {
@@ -474,7 +534,8 @@
       if (used.named && used.numbered && (from === 'cs') !== (to === 'cs')) {
         reasons.push('名前付きのグループと名前なしのグループを混ぜたときの、グループの番号の付け方が違います');
       }
-      out.push({ dialect: to, status: reasons.length ? 'differs' : 'same', reasons });
+      const status = reasons.length ? 'differs' : minor.length ? 'minor' : 'same';
+      out.push({ dialect: to, status, reasons: [...reasons, ...minor] });
     }
     return out;
   }

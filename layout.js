@@ -1,7 +1,7 @@
 /*
  * 欄（カード）の配置を、用意した型から選んで切り替える。
  * 型は CSS グリッドの領域（grid-template-areas）で表し、選んだ型は localStorage に保存する。
- * 「正規表現」の欄は型にかかわらず画面の上に固定するので、型で並べるのは「部品」「意味」「試す」の 3 つ。
+ * 「正規表現」の欄は型にかかわらず画面の上に固定するので、型で並べるのは「部品」「意味」「テスト」の 3 つ。
  * 画面の幅が狭いときは、型にかかわらず縦一列になる（style.css）。
  */
 (function () {
@@ -14,7 +14,7 @@
     {
       id: 'standard',
       name: '標準',
-      desc: '「部品」と「意味」を左右に並べ、下に「試す」',
+      desc: '「部品」と「意味」を左右に並べ、下に「テスト」',
       cols: 'minmax(0, 1fr) minmax(0, 1fr)',
       rows: 'auto auto',
       areas: [
@@ -25,7 +25,7 @@
     {
       id: 'palette-left',
       name: '部品を左に',
-      desc: '左に「部品」、右に「意味」と「試す」を縦に並べる',
+      desc: '左に「部品」、右に「意味」と「テスト」を縦に並べる',
       cols: 'minmax(0, 2fr) minmax(0, 3fr)',
       rows: 'auto 1fr',
       areas: [
@@ -36,7 +36,7 @@
     {
       id: 'meaning-right',
       name: '意味を右に',
-      desc: '左に「部品」と「試す」を縦に並べ、右に「意味」',
+      desc: '左に「部品」と「テスト」を縦に並べ、右に「意味」',
       cols: 'minmax(0, 3fr) minmax(0, 2fr)',
       rows: 'auto 1fr',
       areas: [
@@ -46,8 +46,8 @@
     },
     {
       id: 'test-focus',
-      name: '試すを上に',
-      desc: '「試す」と「意味」を左右に並べ、下に「部品」',
+      name: 'テストを上に',
+      desc: '「テスト」と「意味」を左右に並べ、下に「部品」',
       cols: 'minmax(0, 1fr) minmax(0, 1fr)',
       rows: 'auto auto',
       areas: [
@@ -57,8 +57,8 @@
     },
     {
       id: 'test-second',
-      name: '試すを2段目に',
-      desc: '上に「試す」、下に「部品」と「意味」を左右に並べる',
+      name: 'テストを2段目に',
+      desc: '上に「テスト」、下に「部品」と「意味」を左右に並べる',
       cols: 'minmax(0, 1fr) minmax(0, 1fr)',
       rows: 'auto auto',
       areas: [
@@ -69,7 +69,7 @@
     {
       id: 'single',
       name: '縦一列',
-      desc: '「部品」・「意味」・「試す」を縦一列に並べる',
+      desc: '「部品」・「意味」・「テスト」を縦一列に並べる',
       cols: 'minmax(0, 1fr)',
       rows: 'auto auto auto',
       areas: [['palette'], ['meaning'], ['tester']],
@@ -77,7 +77,7 @@
   ];
 
   // 小さな図の中で各欄を示す 1 文字
-  const SHORT = { pattern: '式', palette: '部', meaning: '意', tester: '試' };
+  const SHORT = { pattern: '式', palette: '部', meaning: '意', tester: 'テ' };
 
   const board = document.getElementById('board');
   const picker = document.getElementById('layout-picker');

@@ -106,8 +106,8 @@
         const atom = parseQuant(parseAtom());
         // サクラエディタ（Onigmo）は、(?i) からグループの終わりまでを 1 つのまとまりとして読む。
         // そのため a(?i)b|c は a(?i:b|c) と同じになる（ほかの言語では (?:ab|(?i)c) に近い）。
-        // (?i) の前に何もなければ、どちらの読み方でも意味は同じなので、まとめない
-        if (atom.type === 'flags' && dialect === 'sakura' && items.some((it) => it.type !== 'comment')) {
+        // (?i) の前にコメントとフラグしかなければ、どちらの読み方でも意味は同じなので、まとめない
+        if (atom.type === 'flags' && dialect === 'sakura' && items.some((it) => it.type !== 'comment' && it.type !== 'flags')) {
           const rest = parseAlt();
           if (rest.type === 'alt') {
             items.push({ type: 'group', kind: 'modifier', isolated: true, name: null, index: null, modOn: atom.on, modOff: atom.off, body: rest, start: atom.start, end: i });
@@ -174,6 +174,8 @@
         if (!q) return atom;
         ({ min, max } = q);
         if (max < min) err('回数の指定 {n,m} で、m が n より小さくなっています', qStart);
+        const limit = isJs ? Infinity : D.repeatMax(dialect);
+        if (min > limit || (max !== Infinity && max > limit)) err(`${dsub}では、繰り返しの回数は ${limit} までです`, qStart);
         i += q.len;
       } else {
         return atom;
@@ -194,9 +196,22 @@
       return node;
     }
 
+    // グループ名に使える文字（tools/dialect-probe で実際に動かして調べた）。Java は英字で始まる英数字だけ（_ も使えない）、
+    // Go は英数字と _ で数字から始めてもよい。ほかは、ひらがなや漢字も使え、数字からは始められない
+    const NAME = dialect === 'java' ? '[A-Za-z][A-Za-z0-9]*'
+      : dialect === 'go' ? '[A-Za-z0-9_]+'
+        : '[\\p{L}\\p{Nl}_][\\p{L}\\p{Nl}\\p{Mn}\\p{Mc}\\p{Nd}\\p{Pc}]*';
+    const nameRe = (open, close) => new RegExp(`^${open}(${NAME})${close}`, 'u');
+    const NAME_DESC = dialect === 'java' ? '英字と数字だけです（1 文字目は英字。_ は使えません）'
+      : dialect === 'go' ? '英数字と _ だけです' : '文字・数字と _ です（1 文字目に数字は使えません）';
+
     function readGroupName(re, what) {
       const m = re.exec(src.slice(i));
-      if (!m) err(`${what}の書き方が正しくありません`);
+      if (!m) {
+        // 名前の区切りはあるのに読めないときは、名前に使えない文字がある
+        if (/^[<'{]?[^<>'{}()\s]+[>'})]/.test(src.slice(i))) err(`${dsub}では、グループ名に使えるのは${NAME_DESC}`);
+        err(`${what}の書き方が正しくありません`);
+      }
       i += m[0].length;
       return m[1];
     }
@@ -246,28 +261,30 @@
         } else if (rest.startsWith('?P<')) {
           if (!can('namedP')) err(`${dsub}では (?P<name>…) は使えません。(?<name>…) と書きます`, start);
           i += 2;
-          name = readGroupName(/^<([A-Za-z_]\w*)>/, 'グループ名');
+          name = readGroupName(nameRe('<', '>'), 'グループ名');
           kind = 'named';
           addNamed(name, start);
         } else if (rest.startsWith('?P=')) {
           if (!can('prefP')) err(`${dsub}では (?P=name) は使えません`, start);
           i += 3;
-          const refName = readGroupName(/^([A-Za-z_]\w*)\)/, '(?P=name)');
+          const refName = readGroupName(nameRe('', '\\)'), '(?P=name)');
           const ref = { type: 'backref', name: refName, start, end: i };
           namedRefs.push(ref);
           return ref;
         } else if (rest.startsWith("?'")) {
           if (!can('namedQuote')) err(`${dsub}では (?'name'…) は使えません`, start);
           i += 1;
-          name = readGroupName(/^'([A-Za-z_]\w*)'/, 'グループ名');
+          name = readGroupName(nameRe("'", "'"), 'グループ名');
           kind = 'named';
           addNamed(name, start);
         } else if (rest.startsWith('?<')) {
           if (!can('namedAngle')) err('Python では、名前付きグループを (?P<name>…) と書きます', start);
           i += 1;
-          name = readGroupName(/^<([A-Za-z_]\w*)>/, 'グループ名');
+          name = readGroupName(nameRe('<', '>'), 'グループ名');
           kind = 'named';
           addNamed(name, start);
+        } else if (rest.startsWith('?(') && D.can(dialect, 'conditional')) {
+          err('このツールは、(?(1)…|…) のような条件分岐には対応していません', start);
         } else if (rest.startsWith('?>')) {
           if (!can('atomic')) err(`${dsub}では (?>…)（アトミックグループ）は使えません`, start);
           kind = 'atomic';
@@ -293,7 +310,9 @@
           } else {
             // (?i) のように範囲を区切らない書き方。書いた位置から、グループの終わりまで効く
             if (!can('inlineFlags')) err(`${dsub}では (?i) のようなフラグの書き方は使えません`, start);
-            if (!can('inlineFlagsMiddle') && start !== 0) err(`${dsub}では、(?i) のようなフラグは正規表現の先頭にしか書けません`, start);
+            // Python は、正規表現の先頭に (?i)(?m) のように並べたり、コメントのあとに書いたりするのは受け付ける（実際の結果）
+            const onlyFlagsBefore = /^(?:\(\?[a-zA-Z-]*\)|\(\?#[^)]*\))*$/.test(src.slice(0, start));
+            if (!can('inlineFlagsMiddle') && !onlyFlagsBefore) err(`${dsub}では、(?i) のようなフラグは正規表現の先頭にしか書けません`, start);
             if (dialect === 'python' && m[2] !== undefined) err('Python では、先頭の (?i) の書き方でフラグを外す（-）ことはできません', start);
             i += m[0].length;
             return { type: 'flags', on: m[1], off: m[2] || '', start, end: i };
@@ -385,11 +404,49 @@
           err(`${dsub}では \\k<name> は使えません${dialect === 'python' ? '。(?P=name) と書きます' : ''}`, start);
         }
         i++;
-        const refName = readGroupName(/^<([A-Za-z_]\w*)>/, '\\k<name>');
+        const refName = readGroupName(nameRe('<', '>'), '\\k<name>');
         const ref = { type: 'backref', name: refName, start, end: i };
         namedRefs.push(ref);
         return ref;
       }
+      // \k'name'（PHP、C#、サクラエディタ）と \k{name}（PHP）
+      if (c === 'k' && ((src[i + 1] === "'" && can('krefQuote')) || (src[i + 1] === '{' && can('krefBrace')))) {
+        const quote = src[i + 1] === "'";
+        i++;
+        const refName = readGroupName(quote ? nameRe("'", "'") : nameRe('\\{', '\\}'), quote ? "\\k'name'" : '\\k{name}');
+        const ref = { type: 'backref', name: refName, start, end: i };
+        namedRefs.push(ref);
+        return ref;
+      }
+      // \g{1}、\g{-1}（相対）、\g{name}（PHP、サクラエディタ）と \g1（PHP）
+      if (c === 'g' && can('gref')) {
+        const tail = src.slice(i);
+        let m;
+        if ((m = /^g\{(-?\d+)\}/.exec(tail)) || (can('grefBare') && (m = /^g(-?\d+)/.exec(tail)))) {
+          const n = Number(m[1]);
+          // -1 は、ここより前で最後に始まったグループ
+          const index = n < 0 ? groupCount + 1 + n : n;
+          if (n === 0 || index < 1) err(`${m[0]} が指すグループはありません`, start);
+          i += m[0].length;
+          const ref = { type: 'backref', index, raw: String(index), start, end: i };
+          numRefs.push(ref);
+          return ref;
+        }
+        if ((m = nameRe('g\\{', '\\}').exec(tail))) {
+          i += m[0].length;
+          const ref = { type: 'backref', name: m[1], start, end: i };
+          namedRefs.push(ref);
+          return ref;
+        }
+        if (/^g[<']/.test(tail)) err('このツールは、\\g<name> のような部分式の呼び出しには対応していません', start);
+      }
+      // PHP の \N は、改行（LF）以外の 1 文字（s フラグにかかわらない）
+      if (c === 'N' && can('notNewline') && src[i + 1] !== '{') {
+        i++;
+        return { type: 'class', negate: true, items: [{ type: 'char', value: '\n', start, end: i }], start, end: i };
+      }
+      if (c === 'X' && can('grapheme')) err('このツールは、\\X（見た目の 1 文字にまとまる文字の並び）には対応していません', start);
+      if (c === 'K' && can('keepOut')) err('このツールは、\\K（一致した文字列の始まりを、その位置に決め直す書き方）には対応していません', start);
       if (c === 'Q') {
         if (!can('quoteQE')) err(`${dsub}では \\Q…\\E は使えません`, start);
         const close = src.indexOf('\\E', i + 1);
@@ -425,6 +482,7 @@
       if (!isJs) {
         if (can('bell')) ctrl.a = '\x07';
         if (can('escChar')) ctrl.e = '\x1b';
+        if (dialect === 'sakura') delete ctrl.v; // サクラエディタの \v は垂直タブではなく文字の v（実際の結果）
       }
       if (ctrl[c]) { i++; return { type: 'char', value: ctrl[c], start, end: i }; }
       let m;
@@ -496,12 +554,26 @@
           if (!can('xHex2')) err(`${dsub}では \\x41 のような書き方は使えません。\\x{41} と書きます`, start);
           return charAt(parseInt(m[1], 16), m[0].length);
         }
+        // PHP は \x のあとの 0〜1 桁の16進数も読む（\x だけなら NUL 文字）
+        if (dialect === 'php') {
+          m = /^x([0-9a-fA-F]?)/.exec(rest);
+          return charAt(parseInt(m[1] || '0', 16), m[0].length);
+        }
         err('\\x のあとに16進数の数字が要ります', start);
       }
       if (c === 'u' && (m = /^u([0-9a-fA-F]{4})/.exec(rest)) && can('uHex4')) return charAt(parseInt(m[1], 16), m[0].length);
       if (c === 'u' && dialect !== 'sakura') err(`${dsub}では \\u0041 のような書き方は使えません${can('xBrace') ? '。\\x{41} と書きます' : ''}`, start);
+      if (c === 'U' && dialect === 'python') {
+        if (!(m = /^U([0-9a-fA-F]{8})/.exec(rest))) err('Python の \\U のあとには、16進数の数字が 8 桁要ります', start);
+        return charAt(parseInt(m[1], 16), m[0].length);
+      }
+      if (c === 'N' && rest[1] === '{' && can('namedChar')) err('このツールは、\\N{…}（文字の名前で書く書き方）には対応していません', start);
       if (c === 'c') {
-        if (!can('ctrlLetter') || !(m = /^c([A-Za-z])/.exec(rest))) err(`${dsub}では \\cA のような書き方は使えません`, start);
+        // Java は \c のあとの文字をそのまま使い（\cj は *）、ほかの言語は英字を大文字にしてから使う（\cj は LF）
+        if (dialect === 'java' && rest.length > 1) return charAt(rest.codePointAt(1) ^ 0x40, 1 + String.fromCodePoint(rest.codePointAt(1)).length);
+        // PHP とサクラエディタは、英字のほかに ASCII の記号も受け付ける（\c? は DEL）
+        const ctrlRe = ['php', 'sakura'].includes(dialect) ? /^c([\x20-\x7e])/ : /^c([A-Za-z])/;
+        if (!can('ctrlLetter') || !(m = ctrlRe.exec(rest))) err(`${dsub}では \\cA のような書き方は使えません`, start);
         return charAt(m[1].toUpperCase().charCodeAt(0) ^ 0x40, m[0].length);
       }
       if (c === 'o' && rest[1] === '{') {
@@ -511,6 +583,8 @@
       if (c === 'p' || c === 'P') {
         if (!can('uprop')) err(`${dsub}では \\p{…} は使えません`, start);
         if ((m = /^[pP]\{(\^?)([^}]+)\}/.exec(rest)) || (m = /^[pP]()([A-Za-z])/.exec(rest))) {
+          if (m[1] === '^' && !can('upropCaret')) err(`${dsub}では \\p{^…} は使えません。\\P{…} と書きます`, start);
+          if (m[0][1] !== '{' && !can('upropBare')) err(`${dsub}では、\\p のあとを {…} で囲みます（例: \\p{L}）`, start);
           if (D.bareScriptInvalid(m[2], dialect)) {
             err(dialect === 'java'
               ? `Java では \\p{${m[2]}} は使えません。\\p{Is${m[2]}} と書きます`
@@ -520,7 +594,8 @@
             err(`${dsub}では \\p{${m[2]}} という名前が使えないか、このツールが対応していない名前です`, start);
           }
           i += m[0].length;
-          return { type: 'uprop', negate: (c === 'P') !== (m[1] === '^'), value: m[2], start, end: i };
+          // \p{lu} のような書き方も、説明や比較では \p{Lu} として扱う
+          return { type: 'uprop', negate: (c === 'P') !== (m[1] === '^'), value: D.canonicalProp(m[2], dialect), start, end: i };
         }
         err('\\p のあとの書き方が正しくありません', start);
       }
@@ -566,7 +641,8 @@
             }
             continue;
           }
-          if (!isJs && dialect !== 'php' && dialect !== 'sakura') {
+          // [\d-z] は、Java・C#・Go では - を文字として読み、Python・PHP・サクラエディタでは誤りになる（実際の結果）
+          if (!isJs && !can('classSetDash')) {
             err('文字クラスの範囲（a-z）の端に、\\d のような文字の集まりは使えません', a.start);
           }
         }
@@ -1311,9 +1387,9 @@
     return out;
   }
 
-  // JavaScript 以外のフラグの説明。g は正規表現そのものではなく、試す欄の設定
+  // JavaScript 以外のフラグの説明。g は正規表現そのものではなく、テストの欄の設定
   const FLAG_TEXT_OTHER = {
-    g: 'すべての一致を探す（試す欄の設定。プログラムでは、すべての一致を返す関数を選んで決める）',
+    g: 'すべての一致を探す（テストの欄の設定。プログラムでは、すべての一致を返す関数を選んで決める）',
     i: FLAG_TEXT.i,
     m: FLAG_TEXT.m,
     s: FLAG_TEXT.s,
@@ -1331,10 +1407,12 @@
     } else {
       tree = [describe(ast, ctx)];
     }
-    // 要約の「文字列」「行」は、先頭の (?m) も見て決める
+    // 要約の「文字列」「行」は、先頭の (?m) も見て決める。先頭の (?m) は、あとの「または」の候補にも効く
     let sctx = ctx;
-    if (ast.type === 'seq') {
-      for (const n of ast.items) {
+    const firstSeq = ast.type === 'alt' ? ast.alts[0] : ast;
+    if (firstSeq.type === 'seq') {
+      for (const n of firstSeq.items) {
+        if (n.type === 'comment') continue;
         if (n.type !== 'flags') break;
         sctx = applyFlags(sctx, n.on, n.off);
       }

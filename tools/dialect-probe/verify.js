@@ -10,7 +10,8 @@ const ctx = { console };
 ctx.window = ctx;
 ctx.globalThis = ctx;
 vm.createContext(ctx);
-for (const f of ['dialects.js', 'regex-explain.js', 'translate.js']) {
+// 一致の探し方（長さ 0 の一致のあとの扱い）は、画面と同じ match-core.js で調べる
+for (const f of ['dialects.js', 'regex-explain.js', 'translate.js', 'match-core.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx);
 }
 const { RegexTranslate } = ctx;
@@ -31,24 +32,31 @@ function ours(c, lang) {
   } catch (e) {
     return e instanceof ctx.RegexTranslate.Untranslatable ? `試せない: ${e.message}` : 'E';
   }
-  let re;
+  let found;
   try {
-    re = new RegExp(t.source, t.flags);
+    found = ctx.MatchCore.findAll(t.source, t.flags, c.s, 100, undefined, null, ctx.RegexDialects.emptyMode(lang)).matches;
   } catch (e) {
     return `置き換えた正規表現を JavaScript が受け付けない: ${e.message}`;
   }
   const conv = toCp(c.s, 'utf16');
-  return [...c.s.matchAll(re)].slice(0, 100).map((m) => [conv(m.index), conv(m.index + m[0].length)]);
+  return found.map((m) => [conv(m.index), conv(m.index + m.text.length)]);
 }
 
 // わかっている違い。JavaScript の正規表現では再現できないため、画面で注意を出している
 const KNOWN = {
-  '(a)?\\1b': '一致しなかったグループの参照は、この言語では失敗するが、JavaScript では空文字列として一致する（試す欄で注意を出す）',
+  '(a)?\\1b': '一致しなかったグループの参照は、この言語では失敗するが、JavaScript では空文字列として一致する（テストの欄で注意を出す）',
   '[[:alpha:]]+': 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている',
-  '😀+': 'C# は絵文字などを 2 文字として数える（試す文字列に絵文字があると、試す欄で注意を出す）',
+  '😀+': 'C# は絵文字などを 2 文字として数える（テスト文字列に絵文字があると、テストの欄で注意を出す）',
   '^.$': '同上',
+  'x(?i:k)|(?i:s)y': 'C# の大文字と小文字を区別しない指定は、ſ（U+017F）を s と同じとみなさない。テストの欄（JavaScript）は同じとみなす',
 };
-const KNOWN_LANGS = { '😀+': ['cs'], '^.$': ['cs'] };
+KNOWN['(?i)ı'] = 'Python の大文字と小文字を区別しない指定は、ı（U+0131）を i と同じとみなす。テストの欄（JavaScript）は同じとみなさない';
+KNOWN['\\pN'] = 'サクラエディタは \\pN を誤りにしないが、Unicode の性質としては読まない。このツールは \\p{N} と書くよう知らせる';
+KNOWN['\\PL'] = '同上';
+// サクラエディタの調べる道具（probe-sakura.ps1）は、文字列の末尾の長さ 0 の一致を調べられない
+for (const p of ['a??', 'x*', '|x', 'a*|b']) KNOWN[p] = 'サクラエディタの調べる道具は、文字列の末尾の長さ 0 の一致を調べられない（probe-sakura.ps1 のコメント）';
+KNOWN['\\x{1F600}??'] = 'Java は長さ 0 の一致のあと UTF-16 の 1 単位だけ進むので、絵文字の途中にも長さ 0 の一致が出る。サクラエディタは上と同じ（末尾の長さ 0 の一致）';
+const KNOWN_LANGS = { 'a??': ['sakura'], 'x*': ['sakura'], '|x': ['sakura'], 'a*|b': ['sakura'], '\\x{1F600}??': ['java', 'sakura'], '😀+': ['cs'], '^.$': ['cs'], 'x(?i:k)|(?i:s)y': ['cs'], '(?i)ı': ['python'], '\\pN': ['sakura'], '\\PL': ['sakura'] };
 // [[:upper:]] なども、[[:alpha:]] と同じ
 for (const name of ['alpha', 'digit', 'upper', 'lower', 'alnum', 'word', 'punct', 'space', 'blank', 'cntrl', 'xdigit']) {
   KNOWN[`[[:${name}:]]+`] = name === 'alpha'

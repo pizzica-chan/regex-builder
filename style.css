@@ -25,7 +25,7 @@
   --tok-group2: #a8327a;
   --tok-look: #6b7280;
   --tok-ref: #953800;
-  /* 試す文字列の、グループごとの下線 */
+  /* テスト文字列の、グループごとの下線 */
   --g0: #2f6fdb;
   --g1: #d4351c;
   --g2: #1a7f37;
@@ -282,7 +282,7 @@ button:hover { border-color: var(--accent); }
 .card[data-card="meaning"] { grid-area: meaning; }
 .card[data-card="tester"] { grid-area: tester; }
 
-/* 幅が狭い画面では、型にかかわらず縦一列にする。結果を先に見られるよう「試す」を上に置く */
+/* 幅が狭い画面では、型にかかわらず縦一列にする。結果を先に見られるよう「テスト」を上に置く */
 @media (max-width: 820px) {
   .board {
     grid-template-columns: minmax(0, 1fr);
@@ -482,7 +482,7 @@ button:hover { border-color: var(--accent); }
 #flag-explain ul { margin: 0; padding-left: 1.4em; font-size: 0.9rem; }
 #flag-explain code { font-family: var(--mono); color: var(--accent); }
 
-/* 試す。文字は textarea で描き、色付きの層には背景と下線だけを描く */
+/* テスト。文字は textarea で描き、色付きの層には背景と下線だけを描く */
 .test-editor .editor-view { color: transparent; }
 .test-editor textarea { min-height: calc(4 * 1.5em + 18px); }
 .test-editor .m { background: var(--mark); border-radius: 3px; }
@@ -627,7 +627,7 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
 .dialect-engine { margin: -4px 0 8px; }
 .flags label[hidden], .slash[hidden], .flag-view[hidden] { display: none; }
 
-/* 試す欄で、ほかの言語を JavaScript に置き換えて動かすときの注意 */
+/* テストの欄で、ほかの言語を JavaScript に置き換えて動かすときの注意 */
 .notes {
   margin: 0 0 8px;
   padding: 8px 12px 8px 28px;
@@ -648,7 +648,8 @@ table.matches tbody tr[data-match]:hover, table.matches tbody tr[data-match]:foc
 }
 .porta-name { font-weight: 600; }
 .porta-status { font-size: 0.85rem; }
-.porta-same .porta-status { color: var(--ok); }
+.porta-same .porta-status,
+.porta-minor .porta-status { color: var(--ok); }
 .porta-differs .porta-status { color: var(--accent); }
 .porta-error .porta-status { color: var(--error); }
 .porta-why { color: var(--muted); font-size: 0.85rem; }

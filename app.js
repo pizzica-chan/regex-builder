@@ -64,6 +64,8 @@
     },
     {
       title: 'グループと選択',
+      // 囲む部品（wrap）は、ボタンに (…) のように「…」を出す
+      hint: '「…」の入った部品は文字を選んでから押すと、選んだ部分を囲みます。',
       items: [
         { label: 'グループ', wrap: ['(', ')'], desc: '囲んだ部分をひとまとめにし、一致した内容を番号で取り出せるようにします。\\1 と書くと、1番のグループと同じ内容にもう一度一致します。', ex: ['(ab)+', 'ababab abx'] },
         { label: '名前付きグループ', wrap: ['(?<name>', ')'], desc: 'グループに名前を付けます。一致した内容を、番号の代わりに名前で取り出せます。name の部分を好きな名前に書き換えてください。', ex: ['(?<year>\\d{4})年', '2026年11月'], wrapBy: { python: ['(?P<name>', ')'] }, exBy: { python: ['(?P<year>\\d{4})年', '2026年11月'] } },
@@ -92,7 +94,7 @@
   const FLAG_TIPS = {
     g: { label: 'すべての一致を探す', desc: '最初の一致で止めずに、文字列の中の一致をすべて探します。付けないと、最初の1つだけを見つけます。「行ごとに判定する」の判定には使いません。', cmp: ['\\d+', '10 個、20 個、30 個', '', 'g'] },
     i: { label: '大文字と小文字を区別しない', desc: '英字の大文字と小文字を同じ文字として扱います。cat は Cat や CAT にも一致し、[a-z] は大文字にも一致します。', cmp: ['cat', 'cat Cat CAT', 'g', 'gi'] },
-    m: { label: '各行の先頭と末尾', desc: '^ と $ を文字列全体の先頭と末尾だけでなく、各行の先頭と末尾にも一致させます。付けないと、^ は文字列の最初、$ は文字列の最後にだけ一致します。', cmp: ['^\\d+', '1. りんご\n2. みかん\n3. ぶどう', 'g', 'gm'] },
+    m: { label: '各行の先頭と末尾', desc: '^ と $ を文字列全体の先頭と末尾だけでなく、各行の先頭と末尾にも一致させます。付けないと、^ は文字列の最初、$ は文字列の最後にだけ一致します（Python・Java・PHP・C# の $ は、文字列の最後の改行の直前にも一致します）。', cmp: ['^\\d+', '1. りんご\n2. みかん\n3. ぶどう', 'g', 'gm'] },
     s: { label: '. を改行にも一致させる', desc: '. を、改行を含むどんな文字にも一致させます。付けないと . は改行に一致しないので、行をまたいで一致させられません。', cmp: ['「.+」', '「1行目\n2行目」', 'g', 'gs'] },
     u: { label: 'Unicode モード', desc: '\\p{…} で文字の種類（漢字やひらがななど）を指定できるようになり、絵文字のような文字も1文字として数えます。書き方の誤りを厳しく調べるので、付けないと通る書き方がエラーになることがあります。', cmp: ['\\p{Script=Han}+', '日本語の文章', 'g', 'gu'] },
     y: { label: '位置を固定して探す', desc: '前の一致の終わり（最初は文字列の先頭）の位置でだけ一致を調べ、その先は探しません。一致が途切れたところで止まるので、先頭から続く部分だけを取り出せます。「行ごとに判定する」の判定には使いません。', cmp: ['[A-Z]\\d', 'A1B2C3 D4', 'g', 'gy'] },
@@ -101,7 +103,7 @@
   // 「行ごとに判定する」の説明。lines: [例のパターン, 例の行]。行ごとに一致するかを並べて見せる
   const LINE_TIP = {
     label: '行ごとに判定する',
-    desc: '試す文字列の各行を別々の文字列として調べ、一致するかを行ごとに表に出します。それぞれの行で「一致するはず」か「一致しないはず」を選ぶと、期待どおりかを判定します。行ごとに調べるので、m フラグがなくても ^ と $ は各行の先頭と末尾に一致します。g と y のフラグは使いません。',
+    desc: 'テスト文字列の各行を別々の文字列として調べ、一致するかを行ごとに表に出します。それぞれの行で「一致するはず」か「一致しないはず」を選ぶと、期待どおりかを判定します。行ごとに調べるので、m フラグがなくても ^ と $ は各行の先頭と末尾に一致します。g と y のフラグは使いません。',
     lines: ['^\\d{3}-\\d{4}$', ['123-4567', '1234567', '〒123-4567']],
   };
 
@@ -145,7 +147,7 @@
     for (const group of PALETTE) {
       const box = document.createElement('div');
       box.className = 'palette-group';
-      box.innerHTML = `<h3>${esc(group.title)}</h3>`;
+      box.innerHTML = `<h3>${esc(group.title)}</h3>${group.hint ? `<p class="hint">${esc(group.hint)}</p>` : ''}`;
       const chips = document.createElement('div');
       chips.className = 'chips';
       for (const raw of group.items) {
@@ -206,6 +208,11 @@
       if (isJs()) re = new RegExp(pattern, flags);
       else {
         const t = Translate.translate(pattern, flags, dialect);
+        // 長さ 0 の一致のあとの探し方を、テストの欄と同じく言語に合わせる（match-core.js）
+        if (flags.includes('g')) {
+          return window.MatchCore.findAll(t.source, t.flags, text, 100, undefined, null, Dialects.emptyMode(dialect)).matches
+            .filter((m) => m.text.length).map((m) => Object.assign([m.text], { index: m.index }));
+        }
         re = new RegExp(t.source, t.flags);
       }
     } catch (_) {
@@ -501,7 +508,7 @@
     el.append(list);
   }
 
-  const PORTA_LABEL = { same: '同じ意味', differs: '意味が変わる', error: '書けない' };
+  const PORTA_LABEL = { same: '同じ意味', minor: 'ほぼ同じ意味', differs: '意味が変わる', error: '書けない' };
 
   function renderPortability(src, flags) {
     const el = $('portability');
@@ -578,7 +585,7 @@
   // ワーカーが使えないとき（file:// で開いたときなど）は、画面と同じスレッドで調べる。この場合は打ち切れない
   function findMatchesHere(re, text, lines) {
     try {
-      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines, lastMap);
+      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines, lastMap, Dialects.emptyMode(dialect));
     } catch (_) {
       return { matches: [], lineHits: null };
     }
@@ -643,11 +650,11 @@
         finishJob({ timeout: true });
       }, MATCH_TIMEOUT_MS);
       job = { id, re, text, lines, resolve, timer };
-      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines, groupMap: lastMap });
+      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines, groupMap: lastMap, emptyMode: Dialects.emptyMode(dialect) });
     });
   }
 
-  // ---------- 試す文字列の色分け ----------
+  // ---------- テスト文字列の色分け ----------
 
   const testView = $('test-view');
   const GROUP_COLORS = 6;
@@ -789,7 +796,7 @@
     let cls = '';
     if (badge.state === 'error') { text = '書き方に誤りがあります'; cls = 'ng'; }
     else if (badge.state === 'timeout') { text = '時間がかかるので打ち切りました'; cls = 'ng'; }
-    else if (badge.state === 'untestable') { text = '試す欄では動かせません'; cls = 'ng'; }
+    else if (badge.state === 'untestable') { text = 'テストの欄では動かせません'; cls = 'ng'; }
     else if (badge.state === 'done') {
       text = badge.count ? `${badge.count}${badge.count >= MAX_MATCHES ? '件以上' : '件'}の一致` : '一致なし';
       const score = lineModeEl.checked ? lineScore() : null;
@@ -831,7 +838,7 @@
       const cells = m.groups.map((g) => (g == null
         ? '<td><span class="none">（なし）</span></td>'
         : `<td><code>${esc(g)}</code></td>`));
-      return `<tr data-match="${n}" tabindex="0" title="押すと、試す文字列のこの部分を選びます"><td>${n + 1}</td><td>${m.index}</td><td><code>${esc(m.text)}</code></td>${cells.join('')}</tr>`;
+      return `<tr data-match="${n}" tabindex="0" title="押すと、テスト文字列のこの部分を選びます"><td>${n + 1}</td><td>${m.index}</td><td><code>${esc(m.text)}</code></td>${cells.join('')}</tr>`;
     }).join('');
     const heads = [];
     for (let g = 1; g <= groupCount; g++) {
@@ -844,7 +851,7 @@
     table.innerHTML = `<div class="table-wrap"><table class="matches"><thead><tr><th>#</th><th>位置</th><th>一致した文字列</th>${heads.join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
-  // 一致の表の行と、試す文字列の色分けを結び付ける
+  // 一致の表の行と、テスト文字列の色分けを結び付ける
   function setupMatchTable() {
     const table = $('match-table');
     const rowOf = (e) => e.target.closest && e.target.closest('tr[data-match]');
@@ -881,7 +888,7 @@
     renderLines();
   }
 
-  // 試す欄で、JavaScript に置き換えて動かすときの注意
+  // テストの欄で、JavaScript に置き換えて動かすときの注意
   function renderNotes() {
     const el = $('dialect-notes');
     const notes = isJs() || !patternEl.value ? [] : [...translateNotes, ...Translate.textNotes(testEl.value, dialect)];
@@ -895,13 +902,13 @@
     renderNotes();
     if (!re) {
       badge.state = !patternEl.value ? 'none' : untestable ? 'untestable' : 'error';
-      clearMatches(untestable ? `試す欄では動かせません。${untestable}` : '');
+      clearMatches(untestable ? `テストの欄では動かせません。${untestable}` : '');
       renderBadge();
       return;
     }
     if (!text) {
       badge.state = 'none';
-      clearMatches('試す文字列を入れてください。');
+      clearMatches('テスト文字列を入れてください。');
       renderBadge();
       return;
     }
@@ -997,7 +1004,7 @@
           untestable = e.message;
           showError('');
         } else {
-          showError(`この正規表現は、試す欄では動かせませんでした。${e.message}`);
+          showError(`この正規表現は、テストの欄では動かせませんでした。${e.message}`);
         }
       }
     }
@@ -1096,7 +1103,7 @@
     }
   }
 
-  // 正規表現・フラグ・試す文字列をまとめて覚えておき、あとで戻す
+  // 正規表現・フラグ・テスト文字列をまとめて覚えておき、あとで戻す
   function snapshot() {
     return { dialect, pattern: patternEl.value, flags: currentFlags(), test: testEl.value, lineMode: lineModeEl.checked };
   }
@@ -1138,7 +1145,7 @@
     const d = Dialects.get(dialect);
     // 英字で終わる名前（「… の re」）のあとには空白を入れる
     const engine = /[A-Za-z0-9)]$/.test(d.engine) ? `${d.engine} ` : d.engine;
-    // 試す欄で JavaScript に置き換えて動かすことは書かない。結果がずれる場面だけ、試す欄に注意を出す
+    // テストの欄で JavaScript に置き換えて動かすことは書かない。結果がずれる場面だけ、テストの欄に注意を出す
     $('dialect-engine').textContent = `${engine}の書き方と意味に合わせています。`;
     $('copy-literal').title = isJs() ? '/…/flags の形でコピー' : `${d.name}のコードの形でコピー`;
     buildPalette();
@@ -1197,7 +1204,7 @@
     });
     $('copy-link').addEventListener('click', () => {
       saveToHash(patternEl.value, currentFlags());
-      const note = testEl.value.length > MAX_SHARED_TEXT ? `（試す文字列は ${MAX_SHARED_TEXT} 文字を超えるので、含めていません）` : '';
+      const note = testEl.value.length > MAX_SHARED_TEXT ? `（テスト文字列は ${MAX_SHARED_TEXT} 文字を超えるので、含めていません）` : '';
       setTimeout(() => copy(location.href, `共有 URL をコピーしました${note}`), 350);
     });
     $('clear').addEventListener('click', () => {

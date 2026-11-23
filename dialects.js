@@ -1,7 +1,7 @@
 /*
  * 言語ごとの正規表現の違い（方言）の定義。
  * 書き方が使えるか、\d などがどの文字に一致するかは、tools/dialect-probe で各言語の処理系を実際に動かして調べた結果に合わせている。
- * regex-explain.js（解析と説明）と translate.js（試す欄で動かす形への置き換え）が使う。
+ * regex-explain.js（解析と説明）と translate.js（テストの欄で動かす形への置き換え）が使う。
  */
 (function (global) {
   'use strict';
@@ -56,6 +56,18 @@
     nestedQuant: ['sakura'], // a** のように繰り返しを重ねられる
     unknownLetterEscape: ['js', 'sakura'], // \q のような、意味のない英字のエスケープを文字として読む
     classNested: ['java', 'sakura'], // [a[b]] と [a-z&&[^b]]
+    classSetDash: ['java', 'cs', 'go'], // [\d-z] の - を文字として読む（ほかの言語は誤り）
+    krefQuote: ['php', 'cs', 'sakura'], // \k'name'
+    krefBrace: ['php'], // \k{name}
+    gref: ['php', 'sakura'], // \g{1} \g{-1} \g{name}
+    grefBare: ['php'], // \g1
+    conditional: ['python', 'php', 'cs', 'sakura'], // (?(1)a|b)（このツールは対応していない）
+    namedChar: ['python', 'java'], // \N{LATIN SMALL LETTER A}（このツールは対応していない）
+    upropCaret: ['php', 'go', 'sakura'], // \p{^L}
+    upropBare: ['java', 'php', 'go'], // \pL
+    grapheme: ['java', 'php', 'sakura'], // \X（このツールは対応していない）
+    keepOut: ['php', 'sakura'], // \K（このツールは対応していない）
+    notNewline: ['php'], // \N（改行以外の 1 文字）
   };
 
   // 後読みの中に書けるもの。any: 何でも / bounded: 最大の長さが決まっていればよい /
@@ -116,6 +128,13 @@
   // \R が CRLF を分けない（CRLF に一致したら、CR だけに戻って試し直さない）言語。Java は試し直す
   const ATOMIC_LINEBREAK = ['php', 'sakura'];
 
+  // 長さ 0 の一致のあとの探し方（match-core.js の findAll）。retry: 同じ位置から長さ 1 以上の一致を探し直す /
+  // skip: 前の一致のすぐあとの長さ 0 の一致を数えない / なし: JavaScript と同じ（実際の結果）
+  const EMPTY_MODE = { python: 'retry', php: 'retry', go: 'skip' };
+
+  // 繰り返しの回数の上限（実際の結果）。ほかの言語は、ふつうに書く数なら上限に当たらない
+  const REPEAT_MAX = { go: 1000, php: 65535, sakura: 100000 };
+
   // 大文字と小文字を区別しない指定が、英字（ASCII）だけに効く言語
   const ASCII_CASE_ONLY = ['java'];
 
@@ -131,9 +150,29 @@
     CJKUnifiedIdeographs: '\\u4e00-\\u9fff',
     BasicLatin: '\\x00-\\x7f',
   };
+  // 二値の性質。Java は \p{IsAlphabetic}、PHP とサクラエディタは \p{Alphabetic} と書く（実際の結果）
+  const BINARY = ['Alphabetic', 'Lowercase', 'Uppercase', 'White_Space', 'Ideographic', 'Hex_Digit'];
+  // Java の \p{IsLetter} などは、一般カテゴリと同じ
+  const JAVA_IS = { Letter: 'L', Digit: 'Nd', Punctuation: 'P' };
+  // 性質の名前を正式な形（Lu、Han、Alphabetic など）にそろえる。PHP とサクラエディタは大文字と小文字、空白、-、_ を区別せず、
+  // Go は一般カテゴリと用字の名前の大文字と小文字を区別しない（\p{lu} や \p{white_space} が通る。実際の結果）
+  const CATEGORY_LIST = CATEGORIES.source.replace(/^\^\(\?:|\)\$$/g, '').split('|');
+  const looseKey = (s) => s.toLowerCase().replace(/[\s_-]/g, '');
+  function canonicalProp(name, dialect) {
+    if (dialect === 'php' || dialect === 'sakura') {
+      return [...CATEGORY_LIST, ...SCRIPTS, ...BINARY].find((n) => looseKey(n) === looseKey(name)) || name;
+    }
+    if (dialect === 'go') return [...CATEGORY_LIST, ...SCRIPTS].find((n) => n.toLowerCase() === name.toLowerCase()) || name;
+    return name;
+  }
+
   function propToJs(name, dialect) {
     if (dialect === 'js') return { prop: name };
+    name = canonicalProp(name, dialect);
     if (CATEGORIES.test(name)) return { prop: name };
+    if (BINARY.includes(name) && ['php', 'sakura'].includes(dialect)) return { prop: name };
+    const is = /^Is(\w+)$/.exec(name);
+    if (is && dialect === 'java' && (BINARY.includes(is[1]) || JAVA_IS[is[1]])) return { prop: JAVA_IS[is[1]] || is[1] };
     let m;
     if ((m = /^(?:script|sc)=(\w+)$/i.exec(name)) && SCRIPTS.includes(m[1])) {
       return ['java', 'php'].includes(dialect) ? { prop: `Script=${m[1]}` } : null;
@@ -151,7 +190,7 @@
 
   // POSIX の文字クラス（[[:alpha:]]）。Go は ASCII だけ、PHP（u 修飾子あり）とサクラエディタは Unicode に広がる。
   // 広がり方は PHP とサクラエディタで違う（tools/dialect-probe/cases.json で各言語の処理系と照らし合わせた）。
-  // 表にない名前（graph と print）は、試す欄では動かせない
+  // 表にない名前（graph と print）は、テストの欄では動かせない
   const ASCII_SYMBOLS = '\\x24\\x2b\\x3c-\\x3e\\x5e\\x60\\x7c\\x7e'; // 記号のうち ASCII のもの（$ + < = > ^ ` | ~）
   const POSIX = {
     go: {
@@ -173,7 +212,7 @@
     return (POSIX[dialect] || {})[name] || null;
   }
 
-  // 言語ごとに使えるフラグ。js 以外の g は「試す欄ですべての一致を探す」だけの意味
+  // 言語ごとに使えるフラグ。js 以外の g は「テストの欄ですべての一致を探す」だけの意味
   const FLAG_SETS = {
     js: ['g', 'i', 'm', 's', 'u', 'y'],
     other: ['g', 'i', 'm', 's'],
@@ -248,12 +287,15 @@
     dollarBeforeFinal: (dialect) => DOLLAR_BEFORE_FINAL[dialect],
     lineBreaks: (dialect) => LINE_BREAKS[dialect],
     caretNotAtEnd: (dialect) => CARET_NOT_AT_END.includes(dialect),
+    emptyMode: (dialect) => EMPTY_MODE[dialect] || '',
+    repeatMax: (dialect) => REPEAT_MAX[dialect] || Infinity,
     atomicLinebreak: (dialect) => ATOMIC_LINEBREAK.includes(dialect),
     asciiCaseOnly: (dialect) => ASCII_CASE_ONLY.includes(dialect),
     codeUnits: (dialect) => CODE_UNITS.includes(dialect),
     unicodeDigit: (dialect) => SETS.digit[dialect] !== ASCII_DIGIT,
     unicodeWord: (dialect) => SETS.word[dialect] !== ASCII_WORD,
     propToJs,
+    canonicalProp,
     // Java と C# は、\p{Han} のような用字の名前だけの書き方を受け付けない（実際に書き方の誤りになった）
     bareScriptInvalid: (name, dialect) => ['java', 'cs'].includes(dialect) && SCRIPTS.includes(name),
     posixToJs,
