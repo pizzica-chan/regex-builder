@@ -7,9 +7,9 @@
 importScripts('match-core.js');
 
 self.onmessage = (e) => {
-  const { id, source, flags, text, max, lines, groupMap, emptyMode } = e.data;
+  const { id, source, flags, text, max, lines, groupMap, emptyMode, program } = e.data;
   try {
-    const { matches, lineHits } = self.MatchCore.findAll(source, flags, text, max, lines, groupMap, emptyMode);
+    const { matches, lineHits } = self.MatchCore.findAll(source, flags, text, max, lines, groupMap, emptyMode, program);
     self.postMessage({ id, matches, lineHits });
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message) });

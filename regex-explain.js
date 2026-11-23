@@ -29,11 +29,251 @@
     return ch + raw.slice(len);
   }
 
+  // 量指定子の付いていない文字が続くところを、1つの文字列にまとめる（parse と parsePosix で使う）
+  function mergeLiterals(items) {
+    const out = [];
+    for (const it of items) {
+      const prev = out[out.length - 1];
+      if (it.type === 'char' && prev && (prev.type === 'char' || prev.type === 'literal')) {
+        // parts は、まとめる前の 1 文字ずつの範囲（入力欄の色分けで、エスケープを見分けるのに使う）
+        out[out.length - 1] = {
+          type: 'literal',
+          value: prev.value + it.value,
+          parts: [...(prev.parts || [{ start: prev.start, end: prev.end }]), { start: it.start, end: it.end }],
+          start: prev.start,
+          end: it.end,
+        };
+      } else {
+        out.push(it);
+      }
+    }
+    return out;
+  }
+
+  // POSIX の拡張正規表現（ere、grep -E）と基本正規表現（bre、grep）を読む。決まりは GNU grep の実際の結果に合わせた
+  // （tools/dialect-probe と docs/dialects/posix.md）。作る構文木は parse と同じ形
+  function parsePosix(src, dialect, flags = '') {
+    const D = global.RegexDialects;
+    const bre = dialect === 'bre';
+    const dsub = D.subject(dialect);
+    let i = 0;
+    let groupCount = 0;
+    // 参照できるグループ。閉じたグループを足す。「または」の次の候補からは、前の候補の中のグループを参照できない（実際の結果）
+    let avail = new Set();
+    const err = (msg, pos = i) => { throw new RegexParseError(msg, pos); };
+    const readChar = () => {
+      const ch = String.fromCodePoint(src.codePointAt(i));
+      i += ch.length;
+      return ch;
+    };
+    const atAlt = () => (bre ? src.startsWith('\\|', i) : src[i] === '|');
+    const atClose = () => (bre ? src.startsWith('\\)', i) : src[i] === ')');
+
+    function parseAlt(depth) {
+      const start = i;
+      const base = new Set(avail);
+      const all = new Set(avail);
+      const alts = [];
+      for (;;) {
+        avail = new Set(base);
+        alts.push(parseSeq(depth));
+        for (const g of avail) all.add(g);
+        if (!atAlt()) break;
+        i += bre ? 2 : 1;
+      }
+      avail = all;
+      return alts.length === 1 ? alts[0] : { type: 'alt', alts, start, end: i };
+    }
+
+    function parseSeq(depth) {
+      const start = i;
+      const items = [];
+      // 正規表現の始め、グループの始め、「または」のあと、^ のあと。ERE では、ここの * + ? { は無視され、BRE の * は文字になる
+      let atStart = true;
+      while (i < src.length && !atAlt() && !(depth > 0 && atClose())) {
+        if (bre && src.startsWith('\\)', i)) err('「\\)」に対応する「\\(」がありません');
+        let atom = parseAtom(atStart, depth);
+        if (atom === null) continue;
+        // 位置の部品（^ $ \b \< など）のあとの * は、ERE では無視され、BRE では文字になる（位置を繰り返す意味にはならない。実際の結果）
+        const anchor = atom.type === 'anchor';
+        if (!anchor) atom = parseQuants(atom);
+        atStart = anchor;
+        items.push(atom);
+      }
+      return { type: 'seq', items: mergeLiterals(items), start, end: i };
+    }
+
+    // {n}、{n,}、{,m}、{n,m}、{,}。BRE は \{ と \} で囲む。数のない {x} や閉じない {1 は、ERE では文字として読む（実際の結果）
+    function readInterval() {
+      const open = bre ? '\\{' : '{';
+      const close = bre ? '\\}' : '}';
+      if (!src.startsWith(open, i)) return null;
+      const re = bre ? /^\\\{(\d*)(,(\d*))?\\\}/ : /^\{(\d*)(,(\d*))?\}/;
+      const m = re.exec(src.slice(i));
+      if (!m || (m[1] === '' && !m[2])) {
+        if (bre) err('「\\{」に対応する「\\}」がないか、回数の書き方が正しくありません');
+        // ERE で、{ のあとが数字と , だけで } で閉じるのに回数として読めないもの（{} や {1,2,3}）は誤り（実際の結果）
+        if (/^\{[\d,]*\}/.test(src.slice(i))) err('回数の指定 {n,m} の書き方が正しくありません');
+        return null;
+      }
+      const min = m[1] === '' ? 0 : Number(m[1]);
+      const max = m[2] ? (m[3] === '' ? Infinity : Number(m[3])) : min;
+      if (max < min) err('回数の指定 {n,m} で、m が n より小さくなっています');
+      const limit = D.repeatMax(dialect);
+      if (min > limit || (max !== Infinity && max > limit)) err(`${dsub}では、繰り返しの回数は ${limit} までです`);
+      return { min, max, len: m[0].length };
+    }
+
+    // 繰り返しは重ねられる（a** や a{2}{3}）
+    function parseQuants(atom) {
+      for (;;) {
+        const qStart = i;
+        let q = null;
+        if (src[i] === '*') { q = { min: 0, max: Infinity, len: 1 }; }
+        else if (!bre && src[i] === '+') { q = { min: 1, max: Infinity, len: 1 }; }
+        else if (!bre && src[i] === '?') { q = { min: 0, max: 1, len: 1 }; }
+        else if (bre && src.startsWith('\\+', i)) { q = { min: 1, max: Infinity, len: 2 }; }
+        else if (bre && src.startsWith('\\?', i)) { q = { min: 0, max: 1, len: 2 }; }
+        else q = readInterval();
+        if (!q) return atom;
+        i += q.len;
+        atom = { type: 'quant', min: q.min, max: q.max, lazy: false, possessive: false, target: atom, start: atom.start, qStart, end: i };
+      }
+    }
+
+    // BRE の $ は、正規表現の終わり、\) の前、\| の前でだけ位置の部品になる
+    const breDollarIsAnchor = () => i + 1 === src.length || src.startsWith('\\)', i + 1) || src.startsWith('\\|', i + 1);
+
+    function parseAtom(atStart, depth) {
+      const start = i;
+      const c = src[i];
+      if (!bre && atStart && /[*+?{]/.test(c)) {
+        // ただし、グループの始めで無視される記号のすぐあとが ) のとき（(?) や (*)）は誤り（実際の結果）
+        if (depth > 0 && src[i + 1] === ')' && src[i - 1] === '(') err(`${dsub}では、( のすぐあとに ${c} だけを書けません`);
+        i++;
+        return null;
+      }
+      if (bre && atStart && c === '*') { i++; return { type: 'char', value: '*', start, end: i }; }
+      if (c === '[') return parseBracket();
+      if (c === '.') { i++; return { type: 'dot', start, end: i }; }
+      if (c === '^') {
+        i++;
+        if (!bre || atStart) return { type: 'anchor', kind: 'start', start, end: i };
+        return { type: 'char', value: '^', start, end: i };
+      }
+      if (c === '$') {
+        const anchor = !bre || breDollarIsAnchor();
+        i++;
+        return anchor ? { type: 'anchor', kind: 'end', start, end: i } : { type: 'char', value: '$', start, end: i };
+      }
+      if (!bre && c === '(') {
+        i++;
+        return parseGroupBody(start, depth);
+      }
+      if (c === '\\') {
+        if (i + 1 >= src.length) err('最後の「\\」のあとに文字がありません');
+        const n = src[i + 1];
+        if (bre && n === '(') { i += 2; return parseGroupBody(start, depth); }
+        if (bre && atStart && /[{+?]/.test(n)) { i += 2; return { type: 'char', value: n, start, end: i }; }
+        i += 1;
+        return parseEscape(start);
+      }
+      return { type: 'char', value: readChar(), start, end: i };
+    }
+
+    function parseGroupBody(start, depth) {
+      const index = ++groupCount;
+      const body = parseAlt(depth + 1);
+      if (!atClose()) err(bre ? '「\\(」に対応する「\\)」がありません' : '「(」に対応する「)」がありません', start);
+      i += bre ? 2 : 1;
+      avail.add(index);
+      return { type: 'group', kind: 'capture', name: null, index, modOn: '', modOff: '', body: body || { type: 'seq', items: [], start: i, end: i }, start, end: i };
+    }
+
+    function parseEscape(start) {
+      const ch = readChar();
+      if (/[1-9]/.test(ch)) {
+        const index = Number(ch);
+        if (!avail.has(index)) err(`グループ${index}は、ここより前で閉じていないので参照できません`, start);
+        return { type: 'backref', index, raw: ch, start, end: i };
+      }
+      const set = { w: 'word', W: 'nonword', s: 'space', S: 'nonspace' }[ch];
+      if (set) return { type: 'set', kind: set, start, end: i };
+      const anchor = { b: 'wordb', B: 'nonwordb', '<': 'wordStart', '>': 'wordEnd', '`': 'strStart', "'": 'strEnd' }[ch];
+      if (anchor) return { type: 'anchor', kind: anchor, start, end: i };
+      // ほかの文字の前の \ は、その文字として読む（\t は t、\d は d。実際の結果）
+      return { type: 'char', value: ch, start, end: i };
+    }
+
+    // 文字クラス。中の \ は文字のまま読む（[\n] は \ と n）。[:alpha:] [=e=] [.a.] が書ける
+    const POSIX_NAMES = ['alpha', 'digit', 'alnum', 'upper', 'lower', 'space', 'blank', 'punct', 'print', 'graph', 'cntrl', 'xdigit'];
+    function parseBracket() {
+      const start = i;
+      // [:alpha:] を文字クラスの外に書くと誤り（[[:alpha:]] と書く。実際の結果）
+      if (/^\[:[^\]]*:\]/.test(src.slice(i))) err(`${dsub}では、[:alpha:] のような書き方は、[[:alpha:]] のように文字クラスの中に書きます`);
+      i++;
+      let negate = false;
+      if (src[i] === '^') { negate = true; i++; }
+      const items = [];
+      let first = true;
+      // [.a.] と [=a=] は 1 文字だけ書ける。[.hyphen.] のような名前や、2 文字以上は誤り（実際の結果）
+      let equiv = false;
+      const element = () => {
+        const m = /^\[([.=])(.+?)\1\]/su.exec(src.slice(i));
+        if (!m) return null;
+        if ([...m[2]].length !== 1) err(`${dsub}では、[${m[1]}…${m[1]}] の中には 1 文字だけ書けます`, i);
+        i += m[0].length;
+        if (m[1] === '=') equiv = true;
+        return m[2];
+      };
+      while (i < src.length && (src[i] !== ']' || first)) {
+        first = false;
+        const istart = i;
+        if (src.startsWith('[:', i)) {
+          const m = /^\[:([A-Za-z]+):\]/.exec(src.slice(i));
+          if (!m) err('POSIX の文字クラス（[:alpha:] など）の書き方が正しくありません', i);
+          if (!POSIX_NAMES.includes(m[1])) err(`[:${m[1]}:] という POSIX の文字クラスはありません`, i);
+          i += m[0].length;
+          if (src[i] === '-' && src[i + 1] !== ']') err('文字クラスの範囲（a-z）の端に、[:alpha:] のような文字の集まりは使えません', istart);
+          items.push({ type: 'posix', name: m[1], negate: false, start: istart, end: i });
+          continue;
+        }
+        equiv = false;
+        const from = element() ?? readChar();
+        if (src[i] === '-' && i + 1 < src.length && src[i + 1] !== ']') {
+          i++;
+          if (src.startsWith('[:', i)) err('文字クラスの範囲（a-z）の端に、[:alpha:] のような文字の集まりは使えません', istart);
+          const to = element() ?? readChar();
+          if (from.codePointAt(0) > to.codePointAt(0)) err('文字クラスの範囲の順番が逆です', istart);
+          // 大文字と小文字を区別しないときは、grep は両端を大文字にしてから範囲を作るので、[Z-a] も誤りになる（実際の結果）
+          const upper = (c) => { const u = c.toUpperCase(); return [...u].length === 1 ? u : c; };
+          if (flags.includes('i') && upper(from).codePointAt(0) > upper(to).codePointAt(0)) {
+            err(`大文字と小文字を区別しないときは、範囲の両端を大文字にしてから範囲を作るので、${from}-${to} は ${upper(from)}-${upper(to)} になり、順番が逆です`, istart);
+          }
+          items.push({ type: 'range', from, to, start: istart, end: i });
+          // 範囲のすぐあとに - で続けると誤り（[a-c-e]。最後の - は文字。実際の結果）
+          if (src[i] === '-' && i + 1 < src.length && src[i + 1] !== ']') err('文字クラスの範囲（a-z）のすぐあとに、- で範囲を続けられません', i);
+          continue;
+        }
+        items.push({ type: 'char', value: from, start: istart, end: i, ...(equiv ? { equiv } : {}) });
+      }
+      if (src[i] !== ']') err('「[」に対応する「]」がありません', start);
+      i++;
+      return { type: 'class', negate, items, start, end: i };
+    }
+
+    const body = parseAlt(0);
+    if (i < src.length) err(bre ? '「\\)」に対応する「\\(」がありません' : '「)」に対応する「(」がありません');
+    const ast = body || { type: 'seq', items: [], start: 0, end: 0 };
+    return { ast, groupCount, dialect };
+  }
+
   // dialect は dialects.js の言語の id（js、python、java、php、cs、go、sakura）。言語ごとに受け付ける書き方を変える
   // opts.scan が true のときは、グループの数を数えるためだけに読む（C# の \12 を後方参照か8進数か決めるのに使う）
   function parse(src, flags, dialect = 'js', opts = {}) {
     const D = global.RegexDialects;
     if (!D || !D.ids.includes(dialect)) dialect = 'js';
+    if (D && D.isPosix(dialect)) return parsePosix(src, dialect, flags || '');
     const isJs = dialect === 'js';
     const can = (feature) => !isJs && D.can(dialect, feature);
     const dsub = D ? D.subject(dialect) : 'JavaScript ';
@@ -71,6 +311,8 @@
       const re = dialect === 'python' ? /^\{(\d*)(?:(,)(\d*))?\}/ : /^\{(\d+)(?:(,)(\d*))?\}/;
       const m = re.exec(src.slice(i));
       if (!m || (m[1] === '' && !m[2])) return null;
+      // Go は {01} のように 0 で始まる回数を回数の指定として読まず、文字のまま読む（実際の結果）
+      if (dialect === 'go' && [m[1], m[3]].some((d) => d && d.length > 1 && d[0] === '0')) return null;
       const min = m[1] === '' ? 0 : Number(m[1]);
       const max = m[2] ? (m[3] === '' ? Infinity : Number(m[3])) : min;
       return { min, max, len: m[0].length };
@@ -121,27 +363,6 @@
       return { type: 'seq', items: mergeLiterals(items), start, end: i };
     }
 
-    // 量指定子の付いていない文字が続くところを、1つの文字列にまとめる
-    function mergeLiterals(items) {
-      const out = [];
-      for (const it of items) {
-        const prev = out[out.length - 1];
-        if (it.type === 'char' && prev && (prev.type === 'char' || prev.type === 'literal')) {
-          // parts は、まとめる前の 1 文字ずつの範囲（入力欄の色分けで、エスケープを見分けるのに使う）
-          out[out.length - 1] = {
-            type: 'literal',
-            value: prev.value + it.value,
-            parts: [...(prev.parts || [{ start: prev.start, end: prev.end }]), { start: it.start, end: it.end }],
-            start: prev.start,
-            end: it.end,
-          };
-        } else {
-          out.push(it);
-        }
-      }
-      return out;
-    }
-
     function parseAtom() {
       const start = i;
       const c = src[i];
@@ -180,7 +401,7 @@
       } else {
         return atom;
       }
-      if (atom.type === 'anchor' && !isJs && dialect !== 'sakura') err('位置を表す部品（^ や \\b など）は繰り返せません', qStart);
+      if (atom.type === 'anchor' && !isJs && !can('anchorQuant')) err(`${dsub}では、位置を表す部品（^ や \\b など）は繰り返せません`, qStart);
       let lazy = false;
       let possessive = false;
       if (src[i] === '?') { lazy = true; i++; }
@@ -189,11 +410,49 @@
         else if (dialect === 'cs') err('C# では *+ のような、戻って試し直さない繰り返し（強欲な繰り返し）は使えません');
         else err(`${dsub}では、繰り返しの記号を重ねられません`);
       }
-      const node = { type: 'quant', min, max, lazy, possessive, target: atom, start: atom.start, qStart, end: i };
+      let node = { type: 'quant', min, max, lazy, possessive, target: atom, start: atom.start, qStart, end: i };
+      if (dialect === 'sakura') node = reduceNestedQuant(node);
       // サクラエディタ（Onigmo）は a** のように繰り返しを重ねられる
       if (can('nestedQuant') && /[*+?]/.test(src[i] || '')) return parseQuant(node);
       if (can('nestedQuant') && src[i] === '{' && readBraceQuant()) return parseQuant(node);
       return node;
+    }
+
+    // サクラエディタ（Onigmo）は、x+?+ や (?:x+?)+ のように、? * + ?? *? +? を重ねた繰り返しを、決まった表に従って 1 つにまとめる。
+    // (?:x+?)+ は x+? と同じになり、x を 1 文字ずつ探す（Onigmo の onig_reduce_nested_quantifier の表。36 通りの重ね方すべてで、
+    // 実際の結果と同じになることを確かめた。ソースそのものは確かめていない）
+    const REDUCE = [ // 行は内側、列は外側の繰り返し（? * + ?? *? +? の順）
+      ['DEL', 'A', 'A', 'QQ', 'AQ', 'ASIS'],
+      ['DEL', 'DEL', 'DEL', 'P_QQ', 'P_QQ', 'DEL'],
+      ['A', 'A', 'DEL', 'ASIS', 'P_QQ', 'DEL'],
+      ['DEL', 'AQ', 'AQ', 'DEL', 'AQ', 'AQ'],
+      ['DEL', 'DEL', 'DEL', 'DEL', 'DEL', 'DEL'],
+      ['ASIS', 'PQ_Q', 'DEL', 'AQ', 'AQ', 'DEL'],
+    ];
+    function reduceNestedQuant(p) {
+      const kindOf = (q) => {
+        if (q.possessive) return -1;
+        const k = q.min === 0 && q.max === 1 ? 0 : q.min === 0 && q.max === Infinity ? 1 : q.min === 1 && q.max === Infinity ? 2 : -1;
+        return k < 0 ? -1 : k + (q.lazy ? 3 : 0);
+      };
+      // (?:…) は、Onigmo の中ではグループとして残らないので、中身の繰り返しを見る
+      let c = p.target;
+      for (;;) {
+        if (c.type === 'group' && c.kind === 'modifier' && !c.modOn && !c.modOff) c = c.body;
+        else if (c.type === 'seq' && c.items.length === 1) c = c.items[0];
+        else break;
+      }
+      if (c.type !== 'quant' || kindOf(p) < 0 || kindOf(c) < 0) return p;
+      const set = (q, min, max, lazy) => ({ ...q, min, max, lazy });
+      switch (REDUCE[kindOf(c)][kindOf(p)]) {
+        case 'DEL': return { ...c, start: p.start, end: p.end };
+        case 'A': return set({ ...p, target: c.target }, 0, Infinity, false);
+        case 'AQ': return set({ ...p, target: c.target }, 0, Infinity, true);
+        case 'QQ': return set({ ...p, target: c.target }, 0, 1, true);
+        case 'P_QQ': return set({ ...p, target: set(c, 1, Infinity, false) }, 0, 1, true);
+        case 'PQ_Q': return set({ ...p, target: set(c, 1, Infinity, true) }, 0, 1, false);
+        default: return p;
+      }
     }
 
     // グループ名に使える文字（tools/dialect-probe で実際に動かして調べた）。Java は英字で始まる英数字だけ（_ も使えない）、
@@ -295,9 +554,20 @@
           if (close < 0) err('「(」に対応する「)」がありません', start);
           i = close + 1;
           return { type: 'comment', start, end: i };
+        } else if (rest.startsWith('?|') && dialect === 'php') {
+          err('このツールは、(?|…)（「または」の候補ごとにグループの番号をそろえる書き方）には対応していません', start);
+        } else if (/^\?(?:R|[+-]?\d|&|P>)/.test(rest) && (dialect === 'php' || dialect === 'sakura')) {
+          err('このツールは、(?1) や (?R) のような部分式の呼び出しには対応していません', start);
         } else {
-          const m = /^\?([a-zA-Z]*)(?:-([a-zA-Z]*))?([:)])/.exec(rest);
+          let m = /^\?([a-zA-Z]*)(?:-([a-zA-Z]*))?([:)])/.exec(rest);
+          // (?^i) は、フラグをすべて外してから i を付ける（PHP とサクラエディタ）
+          const caret = (dialect === 'php' || dialect === 'sakura') && /^\?\^([a-zA-Z]*)([:)])/.exec(rest);
+          if (caret) m = [caret[0], caret[1], [...'ims'].filter((f) => !caret[1].includes(f)).join(''), caret[2]];
           if (!m) err('「(?」のあとの書き方が正しくありません');
+          // Go と Python は、(?-) や (?i-:…) のように - のあとにフラグがないものを誤りにする。
+          // Python、C#、サクラエディタは、フラグのない (?) も誤りにする（実際の結果）
+          if ((dialect === 'go' || dialect === 'python') && m[2] === '' && !caret) err(`${dsub}では、- のあとにフラグを書きます`, start);
+          if (['python', 'cs', 'sakura'].includes(dialect) && m[3] === ')' && !m[1] && m[2] === undefined) err(`${dsub}では、(? のあとにフラグを書きます`, start);
           const letters = m[1] + (m[2] || '');
           const bad = [...letters].find((f) => !'ims'.includes(f));
           if (bad === 'x') err('このツールは、x フラグ（空白を無視する書き方）には対応していません');
@@ -313,7 +583,7 @@
             // Python は、正規表現の先頭に (?i)(?m) のように並べたり、コメントのあとに書いたりするのは受け付ける（実際の結果）
             const onlyFlagsBefore = /^(?:\(\?[a-zA-Z-]*\)|\(\?#[^)]*\))*$/.test(src.slice(0, start));
             if (!can('inlineFlagsMiddle') && !onlyFlagsBefore) err(`${dsub}では、(?i) のようなフラグは正規表現の先頭にしか書けません`, start);
-            if (dialect === 'python' && m[2] !== undefined) err('Python では、先頭の (?i) の書き方でフラグを外す（-）ことはできません', start);
+            if (dialect === 'python' && m[2] !== undefined && !caret) err('Python では、先頭の (?i) の書き方でフラグを外す（-）ことはできません', start);
             i += m[0].length;
             return { type: 'flags', on: m[1], off: m[2] || '', start, end: i };
           }
@@ -335,6 +605,7 @@
       if (i >= src.length) err('最後の「\\」のあとに文字がありません', start);
       const c = src[i];
       if (c === 'b' || c === 'B') {
+        if (dialect === 'java' && src.startsWith('b{g}', i)) err('このツールは、\\b{g}（見た目の 1 文字の区切り）には対応していません', start);
         i++;
         return { type: 'anchor', kind: c === 'b' ? 'wordb' : 'nonwordb', start, end: i };
       }
@@ -396,6 +667,15 @@
         }
         i += len;
         const ref = { type: 'backref', index: Number(digits.slice(0, len)), raw: digits.slice(0, len), start, end: i };
+        numRefs.push(ref);
+        return ref;
+      }
+      // C# とサクラエディタは、\k<1> のように番号でも参照できる（実際の結果）
+      let km;
+      if (c === 'k' && (dialect === 'cs' || dialect === 'sakura') && (km = /^k(?:<(\d+)>|'(\d+)')/.exec(src.slice(i)))) {
+        i += km[0].length;
+        const digits = km[1] || km[2];
+        const ref = { type: 'backref', index: Number(digits), raw: digits, start, end: i };
         numRefs.push(ref);
         return ref;
       }
@@ -532,6 +812,7 @@
       const charAt = (cp, len) => {
         i += len;
         if (cp > 0x10ffff) err('文字コードが大きすぎます', start);
+        if (dialect === 'php' && cp >= 0xd800 && cp <= 0xdfff) err('PHP では、U+D800〜U+DFFF（サロゲート）の文字コードは書けません', start);
         return { type: 'char', value: String.fromCodePoint(cp), start, end: i };
       };
       if (c === '0' || (inClass && /[1-7]/.test(c))) {
@@ -547,7 +828,14 @@
       }
       if (c === 'x') {
         if (rest[1] === '{') {
-          if (!can('xBrace') || !(m = /^x\{([0-9a-fA-F]+)\}/.exec(rest))) err(`${dsub}では \\x{…} は使えません`, start);
+          m = /^x\{([0-9a-fA-F]+)\}/.exec(rest);
+          // サクラエディタは、\x{} や \x{ 41 } を x{} のような文字として読み、\x{110000} はどの文字にも一致しない（実際の結果）
+          if (dialect === 'sakura' && !m) { i += 1; return { type: 'char', value: 'x', start, end: i }; }
+          if (dialect === 'sakura' && parseInt(m[1], 16) > 0x10ffff) {
+            i += m[0].length;
+            return { type: 'class', negate: false, items: [], start, end: i };
+          }
+          if (!can('xBrace') || !m) err(`${dsub}では \\x{…} は使えません`, start);
           return charAt(parseInt(m[1], 16), m[0].length);
         }
         if ((m = /^x([0-9a-fA-F]{2})/.exec(rest))) {
@@ -572,8 +860,11 @@
         // Java は \c のあとの文字をそのまま使い（\cj は *）、ほかの言語は英字を大文字にしてから使う（\cj は LF）
         if (dialect === 'java' && rest.length > 1) return charAt(rest.codePointAt(1) ^ 0x40, 1 + String.fromCodePoint(rest.codePointAt(1)).length);
         // PHP とサクラエディタは、英字のほかに ASCII の記号も受け付ける（\c? は DEL）
-        const ctrlRe = ['php', 'sakura'].includes(dialect) ? /^c([\x20-\x7e])/ : /^c([A-Za-z])/;
+        // C# は英字と @ [ \ ] ^ _ を受け付ける（\c@ は NUL）
+        const ctrlRe = ['php', 'sakura'].includes(dialect) ? /^c([\x20-\x7e])/ : dialect === 'cs' ? /^c([@-_a-z])/ : /^c([A-Za-z])/;
         if (!can('ctrlLetter') || !(m = ctrlRe.exec(rest))) err(`${dsub}では \\cA のような書き方は使えません`, start);
+        // サクラエディタは、文字コードの下位 5 ビットと最上位のビットを使う（\c1 は U+0011。\c? は DEL。実際の結果）
+        if (dialect === 'sakura') return charAt(m[1] === '?' ? 0x7f : m[1].charCodeAt(0) & 0x9f, m[0].length);
         return charAt(m[1].toUpperCase().charCodeAt(0) ^ 0x40, m[0].length);
       }
       if (c === 'o' && rest[1] === '{') {
@@ -590,23 +881,31 @@
               ? `Java では \\p{${m[2]}} は使えません。\\p{Is${m[2]}} と書きます`
               : `C# では \\p{${m[2]}} は使えません。\\p{IsHiragana} のようなブロックの名前を使います`, start);
           }
-          if (!D.propToJs(m[2], dialect)) {
+          const js = D.propToJs(m[2], dialect);
+          if (!js) {
             err(`${dsub}では \\p{${m[2]}} という名前が使えないか、このツールが対応していない名前です`, start);
           }
           i += m[0].length;
-          // \p{lu} のような書き方も、説明や比較では \p{Lu} として扱う
-          return { type: 'uprop', negate: (c === 'P') !== (m[1] === '^'), value: D.canonicalProp(m[2], dialect), start, end: i };
+          // \p{lu} のような書き方も、説明や比較では \p{Lu} として扱う。js は、テストの欄で動かす形（translate.js）
+          return { type: 'uprop', negate: (c === 'P') !== (m[1] === '^'), value: D.canonicalProp(m[2], dialect), js, start, end: i };
         }
         err('\\p のあとの書き方が正しくありません', start);
       }
       if (inClass && c === 'b' && (dialect === 'java' || dialect === 'go')) err(`${dsub}では、文字クラスの中に \\b は使えません`, start);
       const ch = readChar();
-      if (/[A-Za-z0-9]/.test(ch) && !can('unknownLetterEscape')) err(`${dsub}では \\${ch} という書き方はありません`, start);
+      // C# は、意味のない英字のほか、_ やひらがななど単語の文字のエスケープも誤りにする。Go は ASCII 以外の文字のエスケープを誤りにする（実際の結果）
+      const badEscape = (/[A-Za-z0-9]/.test(ch) && !can('unknownLetterEscape'))
+        || (dialect === 'cs' && /[\p{L}\p{Mn}\p{Nd}\p{Pc}‌‍]/u.test(ch))
+        || (dialect === 'go' && ch.codePointAt(0) > 0x7f);
+      if (badEscape) err(`${dsub}では \\${ch} という書き方はありません`, start);
       return { type: 'char', value: ch, start, end: i };
     }
 
     function parseClass() {
       const start = i;
+      // PHP は、[:alpha:] を文字クラスの外に書くと誤りにする。[.a.] と [=a=] は、文字クラスの中でも誤り（実際の結果）
+      const posixLike = (k) => /^\[([:.=])[^\]]*\1\]/.exec(src.slice(k));
+      if (dialect === 'php' && posixLike(i)) err('PHP では、[:alpha:] のような書き方は、[[:alpha:]] のように文字クラスの中に書きます', start);
       i++; // [
       let negate = false;
       if (src[i] === '^') { negate = true; i++; }
@@ -615,6 +914,9 @@
       let first = !isJs;
       while (i < src.length && (src[i] !== ']' || first)) {
         first = false;
+        if (dialect === 'php' && src[i] === '[' && /^[.=]$/.test(src[i + 1] || '') && posixLike(i)) {
+          err('PHP では、[.a.] と [=a=] の書き方は使えません', i);
+        }
         if (!isJs && src[i] === '[' && src[i + 1] === ':' && can('posix')) {
           const m = /^\[:(\^?)([a-z]+):\]/.exec(src.slice(i));
           if (!m) err('POSIX の文字クラス（[:alpha:] など）の書き方が正しくありません');
@@ -623,11 +925,19 @@
           items.push({ type: 'posix', name: m[2], negate: m[1] === '^', start: pstart, end: i });
           continue;
         }
-        if (!isJs && can('classNested') && (src[i] === '[' || src.startsWith('&&', i))) {
-          err('このツールは、文字クラスの入れ子（[a[b]]）と && には対応していません');
+        const nestedAt = (k) => !isJs && can('classNested') && (src[k] === '[' || src.startsWith('&&', k));
+        if (nestedAt(i)) err('このツールは、文字クラスの入れ子（[a[b]]）と && には対応していません');
+        // C# の引き算（[a-z-[aeiou]] は a〜z から母音を除く）。引き算は文字クラスの最後に書く
+        if (dialect === 'cs' && items.length && src.startsWith('-[', i)) {
+          i++;
+          const sub = parseClass();
+          if (src[i] !== ']') err('C# の文字クラスの引き算（-[…]）のあとには、文字を書けません。引き算は文字クラスの最後に書きます', sub.end);
+          i++;
+          return { type: 'class', negate, items, subtract: sub, start, end: i };
         }
         const a = parseClassAtom();
-        if (src[i] === '-' && i + 1 < src.length && src[i + 1] !== ']') {
+        if (src[i] === '-' && nestedAt(i + 1)) err('このツールは、文字クラスの入れ子（[a[b]]）と && には対応していません');
+        if (src[i] === '-' && i + 1 < src.length && src[i + 1] !== ']' && !(dialect === 'cs' && src[i + 1] === '[')) {
           if (a.type === 'char') {
             const dash = i;
             i++;
@@ -675,10 +985,12 @@
 
     // C# は、名前なしのグループに先に番号を付け、名前付きのグループはそのあとの番号にする。同じ名前のグループは同じ番号
     if (dialect === 'cs') {
+      // groups は閉じた順に並んでいるので、始まりの位置の順に並べ直してから番号を付ける（((a)\2) の外側が 1）
+      const ordered = [...groups].sort((a, b) => a.start - b.start);
       let n = 0;
-      for (const g of groups) if (g.kind === 'capture') g.index = ++n;
+      for (const g of ordered) if (g.kind === 'capture') g.index = ++n;
       const byName = {};
-      for (const g of groups) {
+      for (const g of ordered) {
         if (g.kind !== 'named') continue;
         if (!(g.name in byName)) byName[g.name] = ++n;
         g.index = byName[g.name];
@@ -690,6 +1002,14 @@
       if (g) ref.index = g.index;
     }
     if (opts.scan) return { ast, groupCount, dialect };
+    // Python は、あとにあるグループと、まだ閉じていないグループ（(a\1) の \1）への参照を誤りにする（実際の結果）
+    if (dialect === 'python') {
+      for (const ref of [...numRefs, ...namedRefs]) {
+        const g = groups.find((x) => x.index === ref.index);
+        if (g && ref.start < g.start) err('Python では、あとにあるグループは参照できません', ref.start);
+        if (g && ref.start < g.end) err('Python では、グループの中から、そのグループ自身は参照できません', ref.start);
+      }
+    }
     for (const ref of numRefs) {
       if (ref.index <= groupCount) continue;
       // Java は、ないグループへの参照を誤りにしない（一致しないだけ）
@@ -699,7 +1019,7 @@
 
     // 後読みの中身の長さを確かめる
     const rule = isJs ? 'any' : D.lookbehind(dialect);
-    for (const lb of lookbehinds) checkLookbehind(lb, rule, dsub, err);
+    for (const lb of lookbehinds) checkLookbehind(lb, rule, dsub, err, dialect);
     if (dialect === 'sakura') for (const lb of lookbehinds) checkSakuraLookbehind(lb, err);
 
     return { ast, groupCount, dialect };
@@ -750,7 +1070,7 @@
     }
   }
 
-  function checkLookbehind(lb, rule, dsub, err) {
+  function checkLookbehind(lb, rule, dsub, err, dialect) {
     if (rule === 'any') return;
     const body = lb.body;
     const top = body.type === 'alt' ? body.alts : [body];
@@ -767,8 +1087,20 @@
       if (!fixed) err(`${dsub}では、後読みの中身を決まった長さにする必要があります（* や {1,3}、長さの違う「または」は使えません）`, lb.start);
       return;
     }
-    // fixed-alt: 「または」の候補ごとに長さが決まっていればよい
-    if (!top.every((a) => { const [x, y] = widthOf(a); return x === y; })) {
+    // fixed-alt: 「または」の候補ごとに長さが決まっていればよい。
+    // サクラエディタは、(?<=(?:a|bc)) のように中身全体を (?:…) で囲んだときも、その中の候補ごとに見る（実際の結果）
+    let alts = top;
+    if (dialect === 'sakura') {
+      let x = body;
+      for (;;) {
+        if (x.type === 'seq' && x.items.length === 1) x = x.items[0];
+        // JavaScript 以外の (?:…) は、フラグのない modifier として読む（parseGroup）
+        else if (x.type === 'group' && (x.kind === 'noncapture' || (x.kind === 'modifier' && !x.modOn && !x.modOff))) x = x.body;
+        else break;
+      }
+      alts = x.type === 'alt' ? x.alts : [x];
+    }
+    if (!alts.every((a) => { const [x, y] = widthOf(a); return x === y; })) {
       err(`${dsub}では、後読みの中身を「または」の候補ごとに決まった長さにする必要があります`, lb.start);
     }
   }
@@ -879,6 +1211,14 @@
     P: '句読点',
     S: '記号',
     Emoji: '絵文字',
+    LC: '大文字・小文字・タイトルケースの文字',
+    ASCII: 'ASCII の文字（U+0000〜U+007F）',
+    Any: '任意の文字（改行も含む）',
+    White_Space: '空白（全角スペースや改行も含む）',
+    Xan: '文字と数字',
+    Xwd: '文字・数字と _',
+    Xsp: '空白（全角スペースや改行も含む）',
+    Xps: '空白（全角スペースや改行も含む）',
     'Script=Hiragana': 'ひらがな',
     'Script=Katakana': 'カタカナ',
     'Script=Han': '漢字',
@@ -941,9 +1281,19 @@
     word: '文字・数字と _', blank: '横方向の空白（全角スペースも含む）', space: '空白（全角スペースも含む）', punct: '句読点と記号',
   };
 
-  function upropNoun(node) {
+  function upropNoun(node, ctx) {
     const key = node.value.replace(/^(?:sc|Script_Extensions|scx)=/, 'Script=');
-    const base = UPROP_NAMES[key] || `Unicode の性質「${esc(node.value)}」を持つ文字`;
+    let base = UPROP_NAMES[key];
+    // PHP の \p{Han} などは、「、」のように、ほかの用字と一緒に使う記号にも一致する（dialects.js）
+    if (base && /^(?:Script_Extensions|scx)=/.test(node.value)) base += '（「、」のような、ほかの用字と共通の記号も含む）';
+    let m;
+    // Java の \p{Lower} などは ASCII の文字だけ、サクラエディタの \p{Alnum} などは POSIX の文字クラスと同じ範囲（dialects.js）
+    if (!base && (m = /^Posix=(\w+)$/.exec(key))) {
+      const java = ctx && ctx.dialect === 'java';
+      base = java ? `${POSIX_NAMES[m[1]]}（ASCII の文字だけ）` : POSIX_NAMES_UNICODE[m[1]] || POSIX_NAMES[m[1]];
+    }
+    if (!base && (m = /^Block=(\w+)$/.exec(key))) base = `ブロック「${esc(m[1])}」の文字`;
+    if (!base) base = `Unicode の性質「${esc(node.value)}」を持つ文字`;
     return node.negate ? `${base}以外の文字` : base;
   }
 
@@ -954,9 +1304,11 @@
       return name ? `${name}（${range}）` : range;
     }
     if (it.type === 'set') return setItem(it.kind, ctx);
-    if (it.type === 'uprop') return upropNoun(it);
+    if (it.type === 'uprop') return upropNoun(it, ctx);
     if (it.type === 'posix') {
       const names = !isJsCtx(ctx) && ctx.dialect !== 'go' ? { ...POSIX_NAMES, ...POSIX_NAMES_UNICODE } : POSIX_NAMES;
+      // GNU grep の [:digit:] は 0〜9 だけ（全角数字は [:alnum:] に入る）
+      if (!isJsCtx(ctx) && DL().isPosix(ctx.dialect)) names.digit = POSIX_NAMES.digit;
       const name = `${names[it.name] || esc(it.name)}（[:${esc(it.name)}:]）`;
       return it.negate ? `${name} 以外` : name;
     }
@@ -964,6 +1316,16 @@
   }
 
   function classNoun(node, ctx) {
+    const base = classNounBase(node, ctx);
+    // C# の引き算（[a-z-[aeiou]]）
+    if (!node.subtract) return base;
+    const sub = classNoun(node.subtract, ctx);
+    // 「b を除く」のように、英数字のあとには空白を入れる
+    const sep = /[\x21-\x7e]$/.test(sub.replace(/<[^>]*>/g, '')) ? ' ' : '';
+    return `${base}（ただし、${sub}${sep}を除く）`;
+  }
+
+  function classNounBase(node, ctx) {
     if (node.items.length === 0) {
       return node.negate ? anyCharNoun(true) : '存在しない文字（[] はどの文字にも一致しない）';
     }
@@ -994,7 +1356,7 @@
       case 'set': return setNoun(node.kind, ctx);
       case 'dot': return anyCharNoun(ctx.flags.includes('s'), ctx);
       case 'class': return classNoun(node, ctx);
-      case 'uprop': return upropNoun(node);
+      case 'uprop': return upropNoun(node, ctx);
       default: return null;
     }
   }
@@ -1002,11 +1364,15 @@
   function anchorName(node, ctx) {
     const unit = ctx.flags.includes('m') ? '行' : '文字列';
     const beforeFinal = !isJsCtx(ctx) && DL().dollarBeforeFinal(ctx.dialect);
+    // grep は 1 行ずつ調べるので、\` と \' も行の先頭と末尾になる
+    const posix = !isJsCtx(ctx) && DL().isPosix(ctx.dialect);
     switch (node.kind) {
       case 'start': return `${unit}の先頭`;
       case 'end': return unit === '文字列' && beforeFinal ? '文字列の末尾（最後の改行の直前も含む）' : `${unit}の末尾`;
-      case 'strStart': return '文字列の先頭（複数行のモードでも）';
-      case 'strEnd': return '文字列の末尾（最後の改行の直前は含まない）';
+      case 'strStart': return posix ? '行の先頭（grep は 1 行ずつ調べる）' : '文字列の先頭（複数行のモードでも）';
+      case 'strEnd': return posix ? '行の末尾（grep は 1 行ずつ調べる）' : '文字列の末尾（最後の改行の直前は含まない）';
+      case 'wordStart': return '単語の始まり';
+      case 'wordEnd': return '単語の終わり';
       case 'strEndNl': return '文字列の末尾（最後の改行の直前も含む）';
       case 'wordb': return '単語の区切り';
       default: return '単語の区切りではない位置';
@@ -1193,7 +1559,17 @@
     const verb = optional ? 'あってもなくてもよい' : `${countText(node.min, node.max, '回')}繰り返す`;
     const lazy = quantNote(node, !optional);
 
-    if (t.type === 'backref' || t.type === 'anchor' || t.type === 'linebreak') {
+    // ^* や \b+ のような位置を表す部品の繰り返し（Java・C#・Go・サクラエディタで書ける）。位置は何回確かめても同じ
+    if (t.type === 'anchor') {
+      const name = pos(anchorName(t, ctx));
+      return {
+        ...base,
+        html: node.min === 0
+          ? `${name}を${verb}（0回でもよいので、どの位置でも当てはまる）`
+          : `ここが ${name}（${verb}が、1回と同じ意味）`,
+      };
+    }
+    if (t.type === 'backref' || t.type === 'linebreak') {
       return { ...base, html: `${leafTree(t, ctx)}を${verb}${lazy}` };
     }
     // (?:...) は「ひとまとめにする」を挟まず、中身を直接並べる

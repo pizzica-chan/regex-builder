@@ -14,7 +14,8 @@ def run(case):
         flags |= FLAGS[f]
     try:
         rx = re.compile(case['p'], flags)
-    except re.error:
+    # 繰り返しの回数が大きすぎるときは、re.error ではなく OverflowError になる
+    except (re.error, OverflowError):
         return 'E'
     return [[m.start(), m.end()] for m in rx.finditer(case['s'])][:100]
 

@@ -20,15 +20,16 @@
     {
       title: '文字の種類（1文字）',
       items: [
-        { label: '数字', insert: '\\d', desc: '0〜9 の数字1文字に一致します。全角数字（０〜９）には一致しません。', ex: ['\\d+', '部屋は 302 号室、内線は ３０２'], descBy: { 'python php cs sakura': '数字1文字に一致します。全角数字（０〜９）やほかの言語の数字にも一致します。0〜9 だけにしたいときは [0-9] と書きます。' } },
-        { label: '数字以外', insert: '\\D', desc: '数字（0〜9）以外の1文字に一致します。英字や記号、空白、全角数字にも一致します。', ex: ['\\D+', 'A12-34b'], descBy: { 'python php cs sakura': '数字以外の1文字に一致します。全角数字なども数字とみなすので、一致しません。' } },
-        { label: '英数字と _', insert: '\\w', desc: '英字（a〜z、A〜Z）、数字（0〜9）、アンダースコア（_）のどれか1文字に一致します。ひらがなや漢字、全角の英数字には一致しません。', ex: ['\\w+', 'user_01 さん@host'], labelBy: { 'python php cs sakura': '文字・数字と _' }, descBy: { 'python php cs sakura': '文字・数字・アンダースコア（_）のどれか1文字に一致します。ひらがな・カタカナ・漢字・全角の英数字にも一致します。英数字と _ だけにしたいときは [A-Za-z0-9_] と書きます。' } },
+        { label: '数字', insert: '\\d', desc: '0〜9 の数字1文字に一致します。全角数字（０〜９）には一致しません。', ex: ['\\d+', '部屋は 302 号室、内線は ３０２'], descBy: { 'python php cs sakura': '数字1文字に一致します。全角数字（０〜９）やほかの言語の数字にも一致します。0〜9 だけにしたいときは [0-9] と書きます。', 'ere bre': '0〜9 の数字1文字に一致します。全角数字（０〜９）には一致しません。POSIX には \\d がないので、[[:digit:]] と書きます。' } },
+        { label: '数字以外', insert: '\\D', desc: '数字（0〜9）以外の1文字に一致します。英字や記号、空白、全角数字にも一致します。', ex: ['\\D+', 'A12-34b'], descBy: { 'python php cs sakura': '数字以外の1文字に一致します。全角数字なども数字とみなすので、一致しません。', 'ere bre': '数字（0〜9）以外の1文字に一致します。英字や記号、空白、全角数字にも一致します。POSIX には \\D がないので、[^[:digit:]] と書きます。' } },
+        { label: '英数字と _', insert: '\\w', desc: '英字（a〜z、A〜Z）、数字（0〜9）、アンダースコア（_）のどれか1文字に一致します。ひらがなや漢字、全角の英数字には一致しません。', ex: ['\\w+', 'user_01 さん@host'], labelBy: { 'python php cs sakura ere bre': '文字・数字と _' }, descBy: { 'python php cs sakura ere bre': '文字・数字・アンダースコア（_）のどれか1文字に一致します。ひらがな・カタカナ・漢字・全角の英数字にも一致します。英数字と _ だけにしたいときは [A-Za-z0-9_] と書きます。' } },
         { label: '空白', insert: '\\s', desc: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースにも一致します。', ex: ['\\s+', 'a b　c'], descBy: { java: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースには一致しません。', go: 'スペース、タブ、改行など、空白に当たる1文字に一致します。全角スペースと垂直タブには一致しません。' } },
         { label: '空白以外', insert: '\\S', desc: '空白（スペース、タブ、改行など）以外の1文字に一致します。', ex: ['\\S+', 'hello world'] },
         { label: '任意の文字', insert: '.', desc: '改行以外の、どんな文字でも1文字に一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。', ex: ['a.c', 'abc a-c ac'], descBy: {
           'python php cs go': '改行（LF）以外の、どんな文字でも1文字に一致します。CR（\\r）には一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。',
           java: '改行（LF、CR など）以外の、どんな文字でも1文字に一致します。s フラグを付けると改行にも一致します。記号の「.」そのものに一致させたいときは \\. と書きます。',
           sakura: '改行（CR と LF）以外の、どんな文字でも1文字に一致します。サクラエディタでは、s フラグを付けても改行には一致しません。記号の「.」そのものに一致させたいときは \\. と書きます。',
+          'ere bre': 'どんな文字でも1文字に一致します。grep は 1 行ずつ調べるので、改行には一致しません。CR（\\r）には一致します。記号の「.」そのものに一致させたいときは \\. と書きます。',
         } },
         { label: '英小文字', insert: '[a-z]', desc: 'a から z までの英小文字1文字に一致します。i フラグを付けると大文字にも一致します。', ex: ['[a-z]+', 'Hello World'] },
         { label: '英大文字', insert: '[A-Z]', desc: 'A から Z までの英大文字1文字に一致します。', ex: ['[A-Z]', 'Hello World'] },
@@ -45,21 +46,22 @@
         { label: '1回以上', insert: '+', desc: '直前の部品を1回以上繰り返します。', ex: ['ab+c', 'ac abc abbbc'] },
         { label: 'なくてもよい', insert: '?', desc: '直前の部品が1回あっても、なくても一致します。', ex: ['colou?r', 'color colour'] },
         { label: '戻らない繰り返し', insert: '+', only: 'python java php sakura', desc: '*、+、?、{…} のすぐ後ろに付けると、一度一致した繰り返しを戻って試し直しません（強欲な繰り返し）。', ex: ['"[^"]*+"', 'say "hi" and "yo"'] },
-        { label: '最短で一致', insert: '?', desc: '*、+、?、{…} のすぐ後ろに付けると、繰り返しをできるだけ短いところで止めます。付けないと、できるだけ長く一致します。', ex: ['<.+?>', '<b>太字</b>'] },
+        { label: '最短で一致', insert: '?', except: 'ere bre', desc: '*、+、?、{…} のすぐ後ろに付けると、繰り返しをできるだけ短いところで止めます。付けないと、できるだけ長く一致します。', ex: ['<.+?>', '<b>太字</b>'] },
       ],
     },
     {
       title: '位置',
       items: [
-        { label: '先頭', insert: '^', desc: '文字列の先頭に一致します。m フラグを付けると、各行の先頭にも一致します。文字ではなく位置に一致するので、一致した文字列には何も加わりません。', ex: ['^\\d+', '123 abc 456'], descBy: { sakura: '行の先頭に一致します。サクラエディタでは、各行の先頭と末尾に一致する設定（m）が常に有効です。文字ではなく位置に一致するので、一致した文字列には何も加わりません。' } },
+        { label: '先頭', insert: '^', desc: '文字列の先頭に一致します。m フラグを付けると、各行の先頭にも一致します。文字ではなく位置に一致するので、一致した文字列には何も加わりません。', ex: ['^\\d+', '123 abc 456'], descBy: { sakura: '行の先頭に一致します。サクラエディタでは、各行の先頭と末尾に一致する設定（m）が常に有効です。文字ではなく位置に一致するので、一致した文字列には何も加わりません。', 'ere bre': '行の先頭に一致します。grep は 1 行ずつ調べます。文字ではなく位置に一致するので、一致した文字列には何も加わりません。' } },
         { label: '末尾', insert: '$', desc: '文字列の末尾に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。', ex: ['\\d+$', '123 abc 456'], descBy: {
           'python php cs': '文字列の末尾と、文字列の最後の改行（LF）の直前に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。',
           java: '文字列の末尾と、文字列の最後の改行の直前に一致します。m フラグを付けると、各行の末尾にも一致します。文字ではなく位置に一致します。',
           sakura: '行の末尾に一致します。サクラエディタでは、各行の先頭と末尾に一致する設定（m）が常に有効です。文字ではなく位置に一致します。',
+          'ere bre': '行の末尾に一致します。grep は 1 行ずつ調べます。文字ではなく位置に一致します。',
         } },
-        { label: '単語の区切り', insert: '\\b', desc: '英数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。文字ではなく位置に一致します。日本語の単語の区切りには使えません。', ex: ['\\bcat\\b', 'cat concat cat_s cat.'], descBy: { 'python php cs sakura': '文字・数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。ひらがなや漢字も単語の文字とみなします。文字ではなく位置に一致します。' } },
-        { label: '文字列の先頭', insert: '\\A', except: 'js', desc: '文字列全体の先頭だけに一致します。m フラグを付けても、各行の先頭には一致しません。', ex: ['\\A\\d+', '123 abc 456'] },
-        { label: '文字列の末尾', insert: '\\z', insertBy: { python: '\\Z' }, except: 'js', desc: '文字列全体の末尾だけに一致します。最後の改行の直前には一致しません。m フラグを付けても、各行の末尾には一致しません。', ex: ['\\d+\\z', '123 abc 456'], exBy: { python: ['\\d+\\Z', '123 abc 456'] } },
+        { label: '単語の区切り', insert: '\\b', desc: '英数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。文字ではなく位置に一致します。日本語の単語の区切りには使えません。', ex: ['\\bcat\\b', 'cat concat cat_s cat.'], descBy: { 'python php cs sakura ere bre': '文字・数字・_ と、それ以外の文字（または文字列の端）との境目に一致します。ひらがなや漢字も単語の文字とみなします。文字ではなく位置に一致します。' } },
+        { label: '文字列の先頭', insert: '\\A', except: 'js ere bre', desc: '文字列全体の先頭だけに一致します。m フラグを付けても、各行の先頭には一致しません。', ex: ['\\A\\d+', '123 abc 456'] },
+        { label: '文字列の末尾', insert: '\\z', insertBy: { python: '\\Z' }, except: 'js ere bre', desc: '文字列全体の末尾だけに一致します。最後の改行の直前には一致しません。m フラグを付けても、各行の末尾には一致しません。', ex: ['\\d+\\z', '123 abc 456'], exBy: { python: ['\\d+\\Z', '123 abc 456'] } },
       ],
     },
     {
@@ -68,16 +70,16 @@
       hint: '「…」の入った部品は文字を選んでから押すと、選んだ部分を囲みます。',
       items: [
         { label: 'グループ', wrap: ['(', ')'], desc: '囲んだ部分をひとまとめにし、一致した内容を番号で取り出せるようにします。\\1 と書くと、1番のグループと同じ内容にもう一度一致します。', ex: ['(ab)+', 'ababab abx'] },
-        { label: '名前付きグループ', wrap: ['(?<name>', ')'], desc: 'グループに名前を付けます。一致した内容を、番号の代わりに名前で取り出せます。name の部分を好きな名前に書き換えてください。', ex: ['(?<year>\\d{4})年', '2026年11月'], wrapBy: { python: ['(?P<name>', ')'] }, exBy: { python: ['(?P<year>\\d{4})年', '2026年11月'] } },
-        { label: 'まとめるだけ', wrap: ['(?:', ')'], desc: '囲んだ部分をひとまとめにします。グループと違い、一致した内容は記録しません。繰り返しや「または」の範囲を決めるときに使います。', ex: ['(?:ab)+', 'ababab abx'] },
+        { label: '名前付きグループ', wrap: ['(?<name>', ')'], except: 'ere bre', desc: 'グループに名前を付けます。一致した内容を、番号の代わりに名前で取り出せます。name の部分を好きな名前に書き換えてください。', ex: ['(?<year>\\d{4})年', '2026年11月'], wrapBy: { python: ['(?P<name>', ')'] }, exBy: { python: ['(?P<year>\\d{4})年', '2026年11月'] } },
+        { label: 'まとめるだけ', wrap: ['(?:', ')'], except: 'ere bre', desc: '囲んだ部分をひとまとめにします。グループと違い、一致した内容は記録しません。繰り返しや「または」の範囲を決めるときに使います。', ex: ['(?:ab)+', 'ababab abx'] },
         { label: '戻らないまとまり', wrap: ['(?>', ')'], only: 'python java php cs sakura', desc: '囲んだ部分が一度一致したら、あとで失敗しても、その部分を戻って試し直しません（アトミックグループ）。試し直しが減るので、処理が速くなることがあります。', ex: ['(?>\\d+)円', '100円 100ドル'] },
         { label: 'または', insert: '|', desc: '左右のどちらかに一致します。( ) の中で使うと、その ( ) の中だけで「どちらか」になります。', ex: ['cat|dog', 'cat and dog'] },
         { label: '同じ文字列（番号）', except: 'go', insert: '\\1', select: [1, 2], desc: '1番のグループに一致した文字列と同じものに一致します（後方参照）。グループのパターンではなく、実際に一致した文字列を使います。数字の部分を、参照したいグループの番号に書き換えてください。', ex: ['\\b(\\w+)\\s+\\1\\b', 'this is is a test'] },
-        { label: '同じ文字列（名前）', insert: '\\k<name>', select: [3, 7], desc: '名前付きグループに一致した文字列と同じものに一致します（後方参照）。name の部分を、参照したいグループの名前に書き換えてください。', ex: ['(?<q>["\'])(.*?)\\k<q>', 'say "hi" and \'yo"'], except: 'go', insertBy: { python: '(?P=name)' }, selectBy: { python: [4, 8] }, exBy: { python: ['(?P<q>["\'])(.*?)(?P=q)', 'say "hi" and \'yo"'] } },
-        { label: '後ろに続く', except: 'go', wrap: ['(?=', ')'], desc: 'すぐ後ろに、囲んだ内容が続く位置に一致します。続く部分は確かめるだけで、一致した文字列には含めません。', ex: ['\\d+(?=円)', '100円 200ドル'] },
-        { label: '後ろに続かない', except: 'go', wrap: ['(?!', ')'], desc: 'すぐ後ろに、囲んだ内容が続かない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['foo(?!bar)', 'foobar foobaz'] },
-        { label: '前にある', except: 'go', wrap: ['(?<=', ')'], desc: 'すぐ前に、囲んだ内容がある位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<=¥)\\d+', '¥500 と 300円'] },
-        { label: '前にない', except: 'go', wrap: ['(?<!', ')'], desc: 'すぐ前に、囲んだ内容がない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<!¥)\\b\\d+', '¥500 と 300円'] },
+        { label: '同じ文字列（名前）', insert: '\\k<name>', select: [3, 7], desc: '名前付きグループに一致した文字列と同じものに一致します（後方参照）。name の部分を、参照したいグループの名前に書き換えてください。', ex: ['(?<q>["\'])(.*?)\\k<q>', 'say "hi" and \'yo"'], except: 'go ere bre', insertBy: { python: '(?P=name)' }, selectBy: { python: [4, 8] }, exBy: { python: ['(?P<q>["\'])(.*?)(?P=q)', 'say "hi" and \'yo"'] } },
+        { label: '後ろに続く', except: 'go ere bre', wrap: ['(?=', ')'], desc: 'すぐ後ろに、囲んだ内容が続く位置に一致します。続く部分は確かめるだけで、一致した文字列には含めません。', ex: ['\\d+(?=円)', '100円 200ドル'] },
+        { label: '後ろに続かない', except: 'go ere bre', wrap: ['(?!', ')'], desc: 'すぐ後ろに、囲んだ内容が続かない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['foo(?!bar)', 'foobar foobaz'] },
+        { label: '前にある', except: 'go ere bre', wrap: ['(?<=', ')'], desc: 'すぐ前に、囲んだ内容がある位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<=¥)\\d+', '¥500 と 300円'] },
+        { label: '前にない', except: 'go ere bre', wrap: ['(?<!', ')'], desc: 'すぐ前に、囲んだ内容がない位置に一致します。確かめるだけで、一致した文字列には含めません。', ex: ['(?<!¥)\\b\\d+', '¥500 と 300円'] },
       ],
     },
   ];
@@ -110,13 +112,13 @@
   const PRESETS = [
     { name: '郵便番号（123-4567）', pattern: '^\\d{3}-\\d{4}$', flags: 'gm', test: '123-4567\n1234567\n12-34567\n100-0001' },
     { name: '携帯電話の番号', pattern: '^0[789]0-?\\d{4}-?\\d{4}$', flags: 'gm', test: '090-1234-5678\n08012345678\n03-1234-5678' },
-    { name: 'メールアドレス（簡易）', pattern: '^[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+$', flags: 'gm', test: 'user@example.com\nfoo.bar+tag@mail.example.co.jp\nnot-an-email\n@example.com' },
-    { name: '日付（YYYY-MM-DD）', pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\\d|3[01])', patternBy: { python: '(?P<year>\\d{4})-(?P<month>0[1-9]|1[0-2])-(?P<day>0[1-9]|[12]\\d|3[01])' }, flags: 'g', test: '締め切りは 2026-11-30、開始は 2026-12-01 です。2026-13-01 は月が正しくありません。' },
-    { name: 'URL（http と https）', pattern: 'https?://[\\w.-]+(?:/[\\w\\-./?%&=#~]*)?', flags: 'g', test: '詳しくは https://example.com/docs?page=2 を見てください。http://localhost:8080/ も使えます。' },
+    { name: 'メールアドレス（簡易）', pattern: '^[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+$', patternBy: { ere: '^[[:alnum:]_.+-]+@[[:alnum:]_-]+(\\.[[:alnum:]_-]+)+$', bre: '^[[:alnum:]_.+-]\\+@[[:alnum:]_-]\\+\\(\\.[[:alnum:]_-]\\+\\)\\+$' }, flags: 'gm', test: 'user@example.com\nfoo.bar+tag@mail.example.co.jp\nnot-an-email\n@example.com' },
+    { name: '日付（YYYY-MM-DD）', pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\\d|3[01])', patternBy: { python: '(?P<year>\\d{4})-(?P<month>0[1-9]|1[0-2])-(?P<day>0[1-9]|[12]\\d|3[01])', ere: '([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])', bre: '\\([0-9]\\{4\\}\\)-\\(0[1-9]\\|1[0-2]\\)-\\(0[1-9]\\|[12][0-9]\\|3[01]\\)' }, flags: 'g', test: '締め切りは 2026-11-30、開始は 2026-12-01 です。2026-13-01 は月が正しくありません。' },
+    { name: 'URL（http と https）', pattern: 'https?://[\\w.-]+(?:/[\\w\\-./?%&=#~]*)?', patternBy: { ere: 'https?://[[:alnum:]_.-]+(/[[:alnum:]_./?%&=#~-]*)?', bre: 'https\\?://[[:alnum:]_.-]\\+\\(/[[:alnum:]_./?%&=#~-]*\\)\\?' }, flags: 'g', test: '詳しくは https://example.com/docs?page=2 を見てください。http://localhost:8080/ も使えます。' },
     { name: 'ひらがなだけの行', pattern: '^[ぁ-んー]+$', flags: 'gm', test: 'ひらがな\nカタカナ\nまぜまぜカナ\nらーめん' },
-    { name: 'HTML のタグ（最短一致）', pattern: '<.+?>', flags: 'g', test: '<p>こんにちは <strong>世界</strong></p>' },
+    { name: 'HTML のタグ（最短一致）', pattern: '<.+?>', except: 'ere bre', flags: 'g', test: '<p>こんにちは <strong>世界</strong></p>' },
     { name: '同じ単語の繰り返し', pattern: '\\b(\\w+)\\s+\\1\\b', flags: 'gi', test: 'This is is a test. The the end.' },
-    { name: '金額（3 桁ごとのカンマ）', pattern: '(?<!\\d)\\d{1,3}(?:,\\d{3})*(?=円)', flags: 'g', test: '合計 1,234,567円、送料 500円、品番 12345' },
+    { name: '金額（3 桁ごとのカンマ）', pattern: '(?<!\\d)\\d{1,3}(?:,\\d{3})*(?=円)', except: 'ere bre', flags: 'g', test: '合計 1,234,567円、送料 500円、品番 12345' },
   ];
 
   // ---------- 部品の表示 ----------
@@ -127,7 +129,50 @@
     if (by) {
       for (const [k, v] of Object.entries(by)) if (k.split(' ').includes(dialect)) return v;
     }
-    return item[field];
+    const v = item[field];
+    // POSIX の方言では、ほかの言語の書き方の部品と例を、POSIX の書き方に置き換える
+    if (field === 'insert') return toPosix(v);
+    if (field === 'wrap' && v) return v.map(toPosix);
+    if (field === 'ex' && v) return [toPosix(v[0]), v[1]];
+    return v;
+  }
+
+  // POSIX の文字クラス。中では \ が文字になるので、] は先頭、[ と ^ は後ろ、- は最後に置いて、文字として読ませる
+  function posixClass(v, neg) {
+    const chars = [...new Set([...v])];
+    const rest = chars.filter((c) => !']-^['.includes(c));
+    let body = (chars.includes(']') ? ']' : '') + rest.join('') + (chars.includes('[') ? '[' : '') +
+      (chars.includes('^') ? '^' : '') + (chars.includes('-') ? '-' : '');
+    if (!neg && body === '^') return '\\^'; // [^] は「以外」の書き始めになる
+    if (!neg && body.startsWith('^')) body = `${body.slice(1)}^`;
+    return `[${neg ? '^' : ''}${body}]`;
+  }
+
+  // ほかの言語の書き方の正規表現を、POSIX の書き方にする。\d と \D は [[:digit:]] と [^[:digit:]] にし、
+  // BRE では + ? { } | ( ) に \ を付ける。文字クラスの中と、\ の付いた文字はそのまま。もう一度通しても変わらない
+  function toPosix(p) {
+    if (typeof p !== 'string' || !Dialects.isPosix(dialect)) return p;
+    const bre = dialect === 'bre';
+    let out = '';
+    for (let k = 0; k < p.length;) {
+      const c = p[k];
+      if (c === '\\' && k + 1 < p.length) {
+        const n = p[k + 1];
+        out += n === 'd' ? '[[:digit:]]' : n === 'D' ? '[^[:digit:]]' : c + n;
+        k += 2;
+      } else if (c === '[') {
+        let e = k + 1;
+        if (p[e] === '^') e++;
+        if (p[e] === ']') e++;
+        while (e < p.length && p[e] !== ']') e = p.startsWith('[:', e) && p.indexOf(':]', e) > 0 ? p.indexOf(':]', e) + 2 : e + 1;
+        out += p.slice(k, e + 1);
+        k = e + 1;
+      } else {
+        out += bre && '+?{}|()'.includes(c) ? `\\${c}` : c;
+        k++;
+      }
+    }
+    return out;
   }
   const availableIn = (item) => (!item.only || item.only.split(' ').includes(dialect)) &&
     (!item.except || !item.except.split(' ').includes(dialect));
@@ -208,9 +253,9 @@
       if (isJs()) re = new RegExp(pattern, flags);
       else {
         const t = Translate.translate(pattern, flags, dialect);
-        // 長さ 0 の一致のあとの探し方を、テストの欄と同じく言語に合わせる（match-core.js）
-        if (flags.includes('g')) {
-          return window.MatchCore.findAll(t.source, t.flags, text, 100, undefined, null, Dialects.emptyMode(dialect)).matches
+        // 長さ 0 の一致のあとの探し方を、テストの欄と同じく言語に合わせる（match-core.js）。POSIX は、いちばん長い一致を探す
+        if (flags.includes('g') || t.program) {
+          return window.MatchCore.findAll(t.source, t.flags, text, 100, undefined, null, Dialects.emptyMode(dialect), t.program).matches
             .filter((m) => m.text.length).map((m) => Object.assign([m.text], { index: m.index }));
         }
         re = new RegExp(t.source, t.flags);
@@ -249,17 +294,21 @@
       `<div class="tip-sample">${exampleHtml(text, matches)}</div>`;
   }
 
-  function tipHtml(item, code) {
+  function tipHtml(item, rawCode) {
+    // POSIX の方言では、フラグやボタンの説明の例も POSIX の書き方にする（toPosix は、もう一度通しても変わらない）
+    const code = toPosix(rawCode);
     let html = `<div class="tip-head"><strong>${esc(item.label)}</strong>${code ? `<code>${esc(code)}</code>` : ''}</div>`;
     html += `<p>${esc(item.desc)}</p>`;
-    if (item.ex) html += exampleBlock('例', item.ex[0], item.ex[1], 'g', false);
+    if (item.ex) html += exampleBlock('例', toPosix(item.ex[0]), item.ex[1], 'g', false);
     if (item.cmp) {
-      const [pattern, text, off, on] = item.cmp;
+      const [raw, text, off, on] = item.cmp;
+      const pattern = toPosix(raw);
       html += exampleBlock('付けない', pattern, text, off, true);
       html += `<div class="tip-gap"></div>` + exampleBlock('付ける', pattern, text, on, true);
     }
     if (item.lines) {
-      const [pattern, lines] = item.lines;
+      const [raw, lines] = item.lines;
+      const pattern = toPosix(raw);
       html += `<div class="tip-ex"><span class="tip-ex-label">例</span><code>${patternLabel(pattern, '')}</code></div>`;
       html += '<div class="tip-sample tip-lines">' + lines.map((line) => {
         const matches = exampleMatches(pattern, line, '');
@@ -364,11 +413,17 @@
     $('literal-add').addEventListener('click', () => {
       const v = $('literal-text').value;
       if (!v) return;
-      insertText(v.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'));
+      // POSIX の BRE では、+ ? ( ) { } | に \ を付けると特別な意味になるので、付けない
+      const special = dialect === 'bre' ? /[.*^$[\]\\]/g : /[.*+?^${}()|[\]\\/]/g;
+      insertText(v.replace(special, '\\$&'));
     });
     const addClass = (neg) => {
       const v = $('class-text').value;
       if (!v) return;
+      if (Dialects.isPosix(dialect)) {
+        insertText(posixClass(v, neg));
+        return;
+      }
       // [ と ] と、先頭の ^ は文字として入れる。[ は Java などで入れ子の文字クラスになり、先頭の ^ は「以外」の意味になる
       insertText(`[${neg ? '^' : ''}${v.replace(/[[\]]/g, '\\$&').replace(/^\^/, '\\^')}]`);
     };
@@ -384,7 +439,7 @@
         const max = Math.max(min, parseInt($('rep-max').value, 10) || 0);
         q = max === min ? `{${min}}` : `{${min},${max}}`;
       }
-      insertText(q);
+      insertText(toPosix(q));
     });
     // 入力欄で Enter キーを押したら、data-submit のボタンを押したことにする。変換の確定の Enter は除く
     for (const input of document.querySelectorAll('[data-submit]')) {
@@ -585,7 +640,7 @@
   // ワーカーが使えないとき（file:// で開いたときなど）は、画面と同じスレッドで調べる。この場合は打ち切れない
   function findMatchesHere(re, text, lines) {
     try {
-      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines, lastMap, Dialects.emptyMode(dialect));
+      return window.MatchCore.findAll(re.source, re.flags, text, MAX_MATCHES, lines, lastMap, Dialects.emptyMode(dialect), lastProgram);
     } catch (_) {
       return { matches: [], lineHits: null };
     }
@@ -650,7 +705,7 @@
         finishJob({ timeout: true });
       }, MATCH_TIMEOUT_MS);
       job = { id, re, text, lines, resolve, timer };
-      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines, groupMap: lastMap, emptyMode: Dialects.emptyMode(dialect) });
+      worker.postMessage({ id, source: re.source, flags: re.flags, text, max: MAX_MATCHES, lines, groupMap: lastMap, emptyMode: Dialects.emptyMode(dialect), program: lastProgram });
     });
   }
 
@@ -965,6 +1020,8 @@
   let lastRe = null;
   // JavaScript 以外の言語を置き換えて動かすときの、グループの番号の対応と注意。試せないときはその理由
   let lastMap = null;
+  // POSIX のときの状態機械（translate.js の buildProgram）。いちばん長い一致を探すのに使う
+  let lastProgram = null;
   let translateNotes = [];
   let untestable = '';
 
@@ -975,6 +1032,7 @@
 
     lastRe = null;
     lastMap = null;
+    lastProgram = null;
     translateNotes = [];
     untestable = '';
     pv.errPos = null;
@@ -994,6 +1052,7 @@
         const t = Translate.translate(src, flags, dialect);
         lastRe = new RegExp(t.source, t.flags);
         lastMap = t.groupMap;
+        lastProgram = t.program || null;
         translateNotes = t.notes;
         showError('');
       } catch (e) {
@@ -1122,6 +1181,7 @@
     const sel = $('preset');
     sel.length = 1;
     PRESETS.forEach((p, n) => {
+      if (p.except && p.except.split(' ').includes(dialect)) return;
       try {
         window.RegexExplain.parse(forDialect(p, 'pattern'), p.flags, dialect);
       } catch (_) {

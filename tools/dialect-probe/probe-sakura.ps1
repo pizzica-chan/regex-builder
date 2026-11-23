@@ -69,7 +69,8 @@ public static class Breg {
                 int s = (int)((Marshal.ReadIntPtr(Marshal.ReadIntPtr(rx, 32)).ToInt64() - buf.ToInt64()) / 2);
                 int e = (int)((Marshal.ReadIntPtr(Marshal.ReadIntPtr(rx, 36)).ToInt64() - buf.ToInt64()) / 2);
                 list.Add(new[] { s, e });
-                pos = e > s ? e : e + 1;
+                // 長さ 0 の一致のあとは 1 文字進む。絵文字のようなサロゲートペアの途中からは探さない
+                pos = e > s ? e : (e + 1 < text.Length && char.IsHighSurrogate(text[e]) && char.IsLowSurrogate(text[e + 1]) ? e + 2 : e + 1);
             }
             return list.ToArray();
         } finally {

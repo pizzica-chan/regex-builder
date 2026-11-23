@@ -17,7 +17,7 @@ for (const f of ['dialects.js', 'regex-explain.js', 'translate.js', 'match-core.
 const { RegexTranslate } = ctx;
 
 const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'cases.json'), 'utf8'));
-const langs = ['python', 'java', 'php', 'cs', 'go', 'sakura'];
+const langs = ['python', 'java', 'php', 'cs', 'go', 'sakura', 'ere', 'bre'];
 
 const toCp = (s, unit) => (pos) => {
   if (unit === 'cp') return pos;
@@ -34,7 +34,7 @@ function ours(c, lang) {
   }
   let found;
   try {
-    found = ctx.MatchCore.findAll(t.source, t.flags, c.s, 100, undefined, null, ctx.RegexDialects.emptyMode(lang)).matches;
+    found = ctx.MatchCore.findAll(t.source, t.flags, c.s, 100, undefined, null, ctx.RegexDialects.emptyMode(lang), t.program).matches;
   } catch (e) {
     return `置き換えた正規表現を JavaScript が受け付けない: ${e.message}`;
   }
@@ -48,17 +48,35 @@ const KNOWN = {
   '[[:alpha:]]+': 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている',
   '😀+': 'C# は絵文字などを 2 文字として数える（テスト文字列に絵文字があると、テストの欄で注意を出す）',
   '^.$': '同上',
-  'x(?i:k)|(?i:s)y': 'C# の大文字と小文字を区別しない指定は、ſ（U+017F）を s と同じとみなさない。テストの欄（JavaScript）は同じとみなす',
 };
-KNOWN['(?i)ı'] = 'Python の大文字と小文字を区別しない指定は、ı（U+0131）を i と同じとみなす。テストの欄（JavaScript）は同じとみなさない';
 KNOWN['\\pN'] = 'サクラエディタは \\pN を誤りにしないが、Unicode の性質としては読まない。このツールは \\p{N} と書くよう知らせる';
 KNOWN['\\PL'] = '同上';
-// サクラエディタの調べる道具（probe-sakura.ps1）は、文字列の末尾の長さ 0 の一致を調べられない
-for (const p of ['a??', 'x*', '|x', 'a*|b']) KNOWN[p] = 'サクラエディタの調べる道具は、文字列の末尾の長さ 0 の一致を調べられない（probe-sakura.ps1 のコメント）';
-KNOWN['\\x{1F600}??'] = 'Java は長さ 0 の一致のあと UTF-16 の 1 単位だけ進むので、絵文字の途中にも長さ 0 の一致が出る。サクラエディタは上と同じ（末尾の長さ 0 の一致）';
-const KNOWN_LANGS = { 'a??': ['sakura'], 'x*': ['sakura'], '|x': ['sakura'], 'a*|b': ['sakura'], '\\x{1F600}??': ['java', 'sakura'], '😀+': ['cs'], '^.$': ['cs'], 'x(?i:k)|(?i:s)y': ['cs'], '(?i)ı': ['python'], '\\pN': ['sakura'], '\\PL': ['sakura'] };
+// Python・Java・C# の、大文字と小文字を区別しない後方参照は、言語ごとの決まりで比べる。テストの欄は JavaScript の i フラグで比べる（注意を出す）
+KNOWN['(В)\\1'] = 'この言語の大文字と小文字を区別しない後方参照は ᲀ と В を別とみなすが、テストの欄は JavaScript の i フラグで比べる（テストの欄で注意を出す）';
+// GNU grep -i の後方参照は、ȿ（2 バイト）のように大文字（Ȿ、3 バイト）にするとバイト数が増える 18 文字で、行によって結果が変わる。
+// (ȿ)\1 は「ȿȿ」だけの行には一致しないが、「aȿȿ」の中の ȿȿ には一致する。(.).\1 は「ⱾⱾȿ」に一致しないが、決して一致しない |q を足した
+// (.).\1|q は一致する。結果が正規表現の意味ではなく glibc の内部の大きさで変わるので、glibc の欠陥。ツールは、意味どおりにどれにも一致させる
+KNOWN['(ȿ)\\1'] = 'GNU grep -i の後方参照は、大文字にするとバイト数が増える 18 文字（ȿ など）で、正規表現の意味と関係なく結果が変わる（glibc の欠陥。docs/dialects/posix.md）';
+// Java は、英字だけに効く指定なので Ȿ と ȿ を別とみなすが、テストの欄は後方参照があるので英字以外も区別しない（注意を出す）
+const JAVA_REF = 'Java の大文字と小文字を区別しない指定は英字だけに効くが、後方参照があるので、テストの欄では英字以外も区別しない（テストの欄で注意を出す）';
+KNOWN['(.).\\1'] = `POSIX: ${KNOWN['(ȿ)\\1']}。${JAVA_REF}`;
+KNOWN['(.).\\1|q'] = JAVA_REF;
+KNOWN['\\x{1F600}??'] = 'Java は長さ 0 の一致のあと UTF-16 の 1 単位だけ進むので、絵文字の途中にも長さ 0 の一致が出る';
+// サクラエディタの調べる道具（probe-sakura.ps1）は、文字列の末尾から探せないので、前の一致が末尾で終わったあとの、末尾の長さ 0 の一致を調べられない。
+// ツールの結果の最後がその一致で、それを除くと同じときだけ、わかっている違いとする（その直前の長さ 0 の一致は、末尾に U+0001 を足した事例で確かめている）
+const SAKURA_END = 'サクラエディタの調べる道具は、文字列の末尾の長さ 0 の一致を調べられない（probe-sakura.ps1 のコメント）。それを除くと同じ';
+const KNOWN_LANGS = { '(ȿ)\\1': ['ere', 'bre'], '(.).\\1': ['ere', 'bre', 'java'], '(.).\\1|q': ['java'], '(В)\\1': ['python', 'java', 'cs'], '\\x{1F600}??': ['java'], '😀+': ['cs'], '^.$': ['cs'], '\\pN': ['sakura'], '\\PL': ['sakura'] };
+// C# の文字クラスの引き算（[a-z-[aeiou]]）は、Java とサクラエディタでは入れ子の文字クラスとして読まれる
+for (const p of ['[a-z-[aeiou]]+', '[^a-[b]]+', '[\\w-[\\d]]+', '[[=e=][.-.]]']) {
+  KNOWN[p] = 'Java とサクラエディタでは入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている';
+  KNOWN_LANGS[p] = ['java', 'sakura'];
+}
+for (const p of ['(?i:[[:lower:]])', '(?i:[[:^lower:]])', '(?i:[\\p{L}-[\\p{Lu}]])', '[[:upper:]]']) {
+  KNOWN[p] = 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている';
+  KNOWN_LANGS[p] = ['java'];
+}
 // [[:upper:]] なども、[[:alpha:]] と同じ
-for (const name of ['alpha', 'digit', 'upper', 'lower', 'alnum', 'word', 'punct', 'space', 'blank', 'cntrl', 'xdigit']) {
+for (const name of ['alpha', 'digit', 'upper', 'lower', 'alnum', 'word', 'punct', 'space', 'blank', 'cntrl', 'xdigit', 'graph', 'print']) {
   KNOWN[`[[:${name}:]]+`] = name === 'alpha'
     ? 'Java では入れ子の文字クラスとして読まれる。このツールは入れ子に対応していないので、書き方の誤りにしている'
     : '同上';
@@ -80,6 +98,12 @@ for (const lang of langs) {
     const got = ours(c, lang);
     if (typeof got === 'string' && got.startsWith('試せない')) { untestable.push(`${lang} /${c.p}/${c.f}: ${got}`); return; }
     if (JSON.stringify(want) !== JSON.stringify(got)) {
+      const len = [...c.s].length;
+      const last = Array.isArray(got) && got[got.length - 1];
+      if (lang === 'sakura' && Array.isArray(want) && last && last[0] === len && last[1] === len && JSON.stringify(want) === JSON.stringify(got.slice(0, -1))) {
+        known.push(`${lang} /${c.p}/${c.f} ${JSON.stringify(c.s)}: ${SAKURA_END}`);
+        return;
+      }
       if (KNOWN[c.p] && (!KNOWN_LANGS[c.p] || KNOWN_LANGS[c.p].includes(lang))) {
         known.push(`${lang} /${c.p}/${c.f}: ${KNOWN[c.p]}`);
         return;
