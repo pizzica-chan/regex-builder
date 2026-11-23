@@ -41,6 +41,16 @@
       return [ch, ...(csGroups.get(csLower(ch)) || []).filter((c) => c !== ch)];
     }
     if (mode === 'python' && /[Iiİı]/.test(ch)) return [ch, ...['I', 'i', 'İ', 'ı'].filter((c) => c !== ch)];
+    // js-legacy: JavaScript の i フラグ（u と v のフラグなし）。1 文字の大文字にして同じなら同じだが、ASCII 以外の文字を ASCII の文字と同じにはしない
+    // （ſ と s、ケルビン記号と k は別）。絵文字などは 2 つの単位に分かれるので、大文字と小文字の区別がない（実際の結果）
+    if (mode === 'js-legacy') {
+      if (ch.length > 1) return [ch];
+      const esc = (x) => `\\u${x.charCodeAt(0).toString(16).padStart(4, '0')}`;
+      const same = new RegExp(`^${esc(ch)}$`, 'i');
+      if (!caseGroups) buildCaseGroups();
+      const group = new Set([...(caseGroups.get(caseKey(ch)) || []), ...(caseGroups.get(`+${ch.toUpperCase()}`) || [])]);
+      return [ch, ...[...group].filter((x) => x !== ch && x.length === 1 && same.test(x))];
+    }
     // posix: 一致の位置を求めるときの決まり。1 文字の大文字にして同じ文字を同じとみなす
     if (mode === 'posix') {
       if (!posixGroups) {
@@ -901,7 +911,13 @@
           if (n.kind === 'named') f.named = true;
           if (n.kind === 'capture') f.numbered = true;
           if (n.kind === 'modifier' && n.modOn.includes('i')) f.caseless = true;
-          walk(n.body, n.kind === 'modifier' ? withMod(ctx, n.modOn, n.modOff) : ctx);
+          {
+            let c = n.kind === 'modifier' ? withMod(ctx, n.modOn, n.modOff) : ctx;
+            // 後読みの中は右から左へ照らし合わせる（emit の backref と同じ）
+            if (/lookbehind/.test(n.kind)) c = { ...c, lb: [n.start, n.end] };
+            else if (/lookahead/.test(n.kind)) c = { ...c, lb: null };
+            walk(n.body, c);
+          }
           break;
         case 'class':
           if (n.negate) { f.astral = true; f.crossLine = true; }
@@ -952,6 +968,8 @@
           if (mayBeUnset(n, groups)) f.backref = true;
           if (ctx.i) f.caseRef = true; // 大文字と小文字を区別しない後方参照
           const g = groups.get(n.index);
+          // 同じ後読みの中で参照より左にあるグループは、参照する時点では値が入っていない（(?<=(a)\1)b）
+          if (g && ctx.lb && g.start >= ctx.lb[0] && g.end <= ctx.lb[1] && g.end <= n.start) f.backref = true;
           if (g && g.start < n.start && n.start < g.end) f.selfRef = true;
           break;
         }
@@ -975,9 +993,10 @@
   }
 
   // 大文字と小文字を区別しないときに同じとみなす文字が、2 つの言語で違うか（caseVariants、charRunOut）
-  function caseDiffers(used, from, to) {
+  // jsLegacy は、JavaScript の側が u と v のフラグなしで動くか（caseVariants の js-legacy）
+  function caseDiffers(used, from, to, jsLegacy = false) {
     const D = global.RegexDialects;
-    const model = (d) => (D.asciiCaseOnly(d) ? 'ascii' : ['cs', 'python'].includes(d) ? d : D.isPosix(d) ? 'posix' : '');
+    const model = (d) => (d === 'js' && jsLegacy ? 'js-legacy' : D.asciiCaseOnly(d) ? 'ascii' : ['cs', 'python'].includes(d) ? d : D.isPosix(d) ? 'posix' : '');
     if (model(from) === 'ascii' || model(to) === 'ascii') return false; // Java は「英字だけに効く」の理由で知らせる
     const multi = (from === 'sakura') !== (to === 'sakura');
     const same = (ch, m) => caseVariants(ch, m(from)).slice().sort().join('') === caseVariants(ch, m(to)).slice().sort().join('');
@@ -1171,7 +1190,9 @@
         // Java と C# の \p{Lu} などは、大文字・小文字・タイトルケースのどれにも一致する（casedProp）
         minor.push('大文字と小文字を区別しないとき、\\p{Lu} などが一致する文字が少し違います（ĸ のように大文字のない小文字など）');
       }
-      if (used.caseless && caseDiffers(used, from, to)) {
+      // JavaScript の側の u フラグ。ほかの言語から JavaScript で使うときは、u フラグなしで使うものとして比べる
+      const jsLegacy = from === 'js' ? !/[uv]/.test(flags) : to === 'js';
+      if (used.caseless && caseDiffers(used, from, to, jsLegacy)) {
         reasons.push('大文字と小文字を区別しないときに同じとみなす文字が違います（ı と i、ſ と s、ß と ss など）');
       }
       // GNU grep（glibc）は、大文字と小文字を区別しない後方参照で、大文字にするとバイト数が増える文字（ȿ など 18 文字）があると、
