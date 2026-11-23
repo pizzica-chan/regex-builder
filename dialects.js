@@ -445,6 +445,12 @@
     // POSIX の正規表現（grep）。いちばん左のいちばん長い一致を選び、1 行ずつ調べる（match-core.js の findAllPosix）
     posixKnown: (c) => !POSIX_UNKNOWN_RE.test(c),
     posixUnknown: POSIX_UNKNOWN,
+    // grep（ja_JP.UTF-8）の範囲が、文字の番号（コードポイント）の順と同じになるか。ASCII の中と、両端が「ぁ〜ん」か「ァ〜ヶ」の中の範囲は同じ。
+    // ほかはロケールの並び順で決まる（[一-龠] は 6274 字だけ）か、並び順の表にない文字（龯、ゖ、ヷ など）を端にすると誤りになる（実際の結果）
+    posixCodepointRange: (from, to) => {
+      const within = (lo, hi) => [from, to].every((c) => c.codePointAt(0) >= lo && c.codePointAt(0) <= hi);
+      return within(0, 0x7f) || within(0x3041, 0x3093) || within(0x30a1, 0x30f6);
+    },
     isPosix: (dialect) => POSIX_DIALECTS.includes(dialect),
     unicodeDigit: (dialect) => SETS.digit[dialect] !== ASCII_DIGIT,
     unicodeWord: (dialect) => SETS.word[dialect] !== ASCII_WORD,

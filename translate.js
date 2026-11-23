@@ -448,9 +448,9 @@
               notes.add(`大文字と小文字を区別しないとき、grep は範囲の両端を大文字にしてから範囲を作ります。${it.from}-${it.to} は ${from}-${to} と同じ意味になります。`);
             }
           }
-          // GNU grep の範囲は、ASCII の外ではロケールの照合の順で決まる（ja_JP.UTF-8 の [一-龠] は 6274 字だけ、C.UTF-8 では誤り）
-          if (posix && (it.from.codePointAt(0) > 0x7f || it.to.codePointAt(0) > 0x7f)) {
-            notes.add('ASCII の外の文字を使った範囲は、テストの欄では文字の番号（コードポイント）の順で一致を調べます。grep ではロケールの並び順で決まるので、一致する文字が違うことがあります。');
+          // GNU grep の範囲は、ASCII の外ではロケールの照合の順で決まる（ja_JP.UTF-8 の [一-龠] は 6274 字だけ。並び順の表にない文字を端にした [一-龯] と、C.UTF-8 の範囲は誤り）
+          if (posix && !D.posixCodepointRange(it.from, it.to)) {
+            notes.add('ASCII、ひらがな（ぁ〜ん）、カタカナ（ァ〜ヶ）のどれにも収まらない範囲は、テストの欄では文字の番号（コードポイント）の順で一致を調べます。grep ではロケールの並び順で決まるので、一致する文字が違ったり、誤り（Invalid collation character）になったりすることがあります。');
           }
           if (ctx.i && !useJsI) {
             const a = from.codePointAt(0);
@@ -847,6 +847,8 @@
         case 'class':
           if (n.negate) { f.astral = true; f.crossLine = true; }
           n.items.forEach((it) => {
+            // ASCII、ひらがな、カタカナのどれにも収まらない範囲。GNU grep ではロケールの並び順で決まる（dialects.js の posixCodepointRange）
+            if (it.type === 'range' && !global.RegexDialects.posixCodepointRange(it.from, it.to)) f.wideRange = true;
             if (it.type === 'char') addCaseChar(it.value, ctx);
             else if (it.type === 'range' && ctx.i) {
               const a = it.from.codePointAt(0);
@@ -1134,6 +1136,11 @@
         }
         if (used.canBeEmpty) {
           reasons.push(D.isPosix(to) ? 'grep は、長さ 0 の一致を出しません（x* は空の一致を数えません）' : '長さ 0 の一致も、一致として数えます');
+        }
+        if (used.wideRange) {
+          reasons.push(D.isPosix(to)
+            ? '[一-龠] のような、ASCII、ひらがな、カタカナのどれにも収まらない範囲は、grep ではロケールの並び順で決まるので、一致する文字が変わったり、誤りになったりすることがあります'
+            : '[一-龠] のような、ASCII、ひらがな、カタカナのどれにも収まらない範囲は、ロケールの並び順ではなく、文字の番号（コードポイント）の順で決まります');
         }
         if (used.casedProp) {
           reasons.push(D.isPosix(to)

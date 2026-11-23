@@ -36,7 +36,7 @@
         { label: '英字', insert: '[A-Za-z]', desc: '英字（大文字と小文字）1文字に一致します。数字には一致しません。', ex: ['[A-Za-z]+', 'abc123DEF'] },
         { label: 'ひらがな', insert: '[ぁ-ん]', desc: '「ぁ」から「ん」までのひらがな1文字に一致します。長音記号の「ー」は含みません。', ex: ['[ぁ-ん]+', 'ひらがなとカタカナ'] },
         { label: 'カタカナ', insert: '[ァ-ヶー]', desc: '「ァ」から「ヶ」までのカタカナと、長音記号の「ー」のどれか1文字に一致します。半角カタカナは含みません。', ex: ['[ァ-ヶー]+', 'コーヒーとお茶'] },
-        { label: '漢字', insert: '[一-龯]', desc: 'よく使う漢字（「一」から「龯」までの範囲）1文字に一致します。「々」と、この範囲の外にある一部の漢字は含みません。', ex: ['[一-龯]+', '日々の東京'] },
+        { label: '漢字', insert: '[一-龯]', except: 'ere bre', desc: 'よく使う漢字（「一」から「龯」までの範囲）1文字に一致します。「々」と、この範囲の外にある一部の漢字は含みません。', ex: ['[一-龯]+', '日々の東京'] },
       ],
     },
     {
@@ -114,7 +114,7 @@
     { name: '携帯電話の番号', pattern: '^0[789]0-?\\d{4}-?\\d{4}$', flags: 'gm', test: '090-1234-5678\n08012345678\n03-1234-5678' },
     { name: 'メールアドレス（簡易）', pattern: '^[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+$', patternBy: { ere: '^[[:alnum:]_.+-]+@[[:alnum:]_-]+(\\.[[:alnum:]_-]+)+$', bre: '^[[:alnum:]_.+-]\\+@[[:alnum:]_-]\\+\\(\\.[[:alnum:]_-]\\+\\)\\+$' }, flags: 'gm', test: 'user@example.com\nfoo.bar+tag@mail.example.co.jp\nnot-an-email\n@example.com' },
     { name: '日付（YYYY-MM-DD）', pattern: '(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\\d|3[01])', patternBy: { python: '(?P<year>\\d{4})-(?P<month>0[1-9]|1[0-2])-(?P<day>0[1-9]|[12]\\d|3[01])', ere: '([0-9]{4})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])', bre: '\\([0-9]\\{4\\}\\)-\\(0[1-9]\\|1[0-2]\\)-\\(0[1-9]\\|[12][0-9]\\|3[01]\\)' }, flags: 'g', test: '締め切りは 2026-11-30、開始は 2026-12-01 です。2026-13-01 は月が正しくありません。' },
-    { name: 'URL（http と https）', pattern: 'https?://[\\w.-]+(?:/[\\w\\-./?%&=#~]*)?', patternBy: { ere: 'https?://[[:alnum:]_.-]+(/[[:alnum:]_./?%&=#~-]*)?', bre: 'https\\?://[[:alnum:]_.-]\\+\\(/[[:alnum:]_./?%&=#~-]*\\)\\?' }, flags: 'g', test: '詳しくは https://example.com/docs?page=2 を見てください。http://localhost:8080/ も使えます。' },
+    { name: 'URL（http と https）', pattern: 'https?://[\\w.-]+(?::\\d+)?(?:/[\\w\\-./?%&=#~]*)?', patternBy: { ere: 'https?://[[:alnum:]_.-]+(:[0-9]+)?(/[[:alnum:]_./?%&=#~-]*)?', bre: 'https\\?://[[:alnum:]_.-]\\+\\(:[0-9]\\+\\)\\?\\(/[[:alnum:]_./?%&=#~-]*\\)\\?' }, flags: 'g', test: '詳しくは https://example.com/docs?page=2 を見てください。http://localhost:8080/ も使えます。' },
     { name: 'ひらがなだけの行', pattern: '^[ぁ-んー]+$', flags: 'gm', test: 'ひらがな\nカタカナ\nまぜまぜカナ\nらーめん' },
     { name: 'HTML のタグ（最短一致）', pattern: '<.+?>', except: 'ere bre', flags: 'g', test: '<p>こんにちは <strong>世界</strong></p>' },
     { name: '同じ単語の繰り返し', pattern: '\\b(\\w+)\\s+\\1\\b', flags: 'gi', test: 'This is is a test. The the end.' },
@@ -131,7 +131,7 @@
     }
     const v = item[field];
     // POSIX の方言では、ほかの言語の書き方の部品と例を、POSIX の書き方に置き換える
-    if (field === 'insert') return toPosix(v);
+    if (field === 'insert' || field === 'pattern') return toPosix(v);
     if (field === 'wrap' && v) return v.map(toPosix);
     if (field === 'ex' && v) return [toPosix(v[0]), v[1]];
     return v;
