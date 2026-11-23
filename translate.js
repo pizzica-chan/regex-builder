@@ -216,6 +216,32 @@
     return info;
   }
 
+  // 2 回以上繰り返す部分の中で、回によって一致しないことがあるグループの番号（(?:(a)|b)+ の (a)）。
+  // JavaScript は繰り返しの回ごとにグループの値を消すので、最後の回で一致しなければ値がない。ほかの言語は、前の回の値を残す
+  // （Python、Java、PHP、C#、PowerShell、Go、サクラエディタ、GNU grep で確かめた）。
+  // optional は、外側の繰り返しの 1 回の中で、そのグループが一致しないことがあるか
+  function repeatedOptionalGroups(ast) {
+    const out = new Set();
+    (function walk(n, inRepeat, optional) {
+      if (!n || typeof n !== 'object') return;
+      switch (n.type) {
+        case 'seq': n.items.forEach((it) => walk(it, inRepeat, optional)); break;
+        case 'alt': n.alts.forEach((a) => walk(a, inRepeat, true)); break;
+        case 'quant':
+          // 2 回以上繰り返すときは、そこから新しく回を数える。外側の繰り返しの中なら、0 回のときに外側の回で一致しない
+          if (n.max > 1) walk(n.target, true, inRepeat && (optional || n.min === 0));
+          else walk(n.target, inRepeat, optional || n.min === 0);
+          break;
+        case 'group':
+          if (n.index && inRepeat && optional) out.add(n.index);
+          walk(n.body, inRepeat, optional || n.kind === 'neglookahead' || n.kind === 'neglookbehind');
+          break;
+        default: break;
+      }
+    })(ast, false, false);
+    return out;
+  }
+
   // 一致しなかったグループを参照するおそれがあるか。参照がグループの終わりより前にある（\1(a) や (a\1)）ときも、
   // 参照する時点ではグループに何も入っていない
   function mayBeUnset(ref, info) {
@@ -327,6 +353,11 @@
         ? 'Java の大文字と小文字を区別しない指定は英字（A〜Z、a〜z）だけに効きますが、後方参照があるので、テストの欄では英字以外（é と É など）も区別しないで比べています。'
         : 'Java の大文字と小文字を区別しない指定は、英字（A〜Z、a〜z）だけに効かせています。');
     }
+
+    // 繰り返しの中で、回によって一致しないことがあるグループ。JavaScript は回ごとに値を消すが、ほかの言語は前の回の値を残す。
+    // JavaScript の正規表現では再現できないので、注意を出す（POSIX は状態機械で探すときは一致の範囲が同じなので、下で消す）
+    const REPEAT_GROUP_NOTE = `繰り返しの中のグループは、この言語では、その回に一致しなくても前の回の値が残りますが、テストの欄では回ごとに値が消えます（(?:(a)|b)+ を ab に使うと、この言語のグループ 1 は a、テストの欄ではなし）。表のグループの値${D.can(dialect, 'backref') || posix ? 'や、そのグループへの後方参照の一致' : ''}が変わることがあります。`;
+    if (repeatedOptionalGroups(ast).size) notes.add(REPEAT_GROUP_NOTE);
 
     // ---------- 2 回目: 書き出す ----------
     const wordClass = `[${D.set('word', dialect)}]`;
@@ -736,6 +767,7 @@
         // 後方参照も状態機械で探すので、JavaScript の正規表現の決まりによる注意は要らない
         notes.delete('一致しなかったグループを参照すると、この言語では失敗しますが、テストの欄では空文字列として一致したものとして扱います。');
         notes.delete(POSIX_REF_CASE_NOTE);
+        notes.delete(REPEAT_GROUP_NOTE);
         if (groupCount) notes.add('グループの位置は、テストの欄では JavaScript の決まりで求めるので、POSIX の決まりと違うことがあります（一致の範囲は POSIX と同じ）。');
         if (program.refs && program.fold) notes.add('大文字と小文字を区別しない後方参照は、ȿ（U+023F）のように大文字にするとバイト数が増える文字があると、grep では一致しないことがあります（glibc の欠陥）。テストの欄では、意味どおりに一致させます。');
       } else {
@@ -837,6 +869,7 @@
       casedProp: false, dotS: false, endNl: false, selfRef: false, astral: false, canBeEmpty: minWidth(ast) === 0,
     };
     const groups = groupInfo(ast);
+    f.repeatGroup = repeatedOptionalGroups(ast).size > 0;
     const withMod = (ctx, on, off) => {
       const c = { ...ctx };
       for (const x of 'ims') { if (on.includes(x)) c[x] = true; if (off.includes(x)) c[x] = false; }
@@ -966,10 +999,12 @@
   // 位置などの情報を除いた構文木。2 つの言語で同じ読み方をしたかを比べるのに使う
   const IGNORE_KEYS = ['start', 'end', 'qStart', 'parts', 'raw', 'index', 'missing', 'quoted'];
   const CHILD_KEYS = ['items', 'alts', 'body', 'target'];
-  // JavaScript の \p{…} には js（テストの欄で動かす形）がないので、名前のまま補って比べる
+  // JavaScript の \p{…} には js（テストの欄で動かす形）がないので、名前のまま補って比べる。
+  // (?:…) は、JavaScript では noncapture、ほかの言語ではフラグのない modifier として読む（regex-explain.js の parseGroup）ので、そろえて比べる
   function shape(ast) {
     return JSON.stringify(ast, (k, v) => {
       if (IGNORE_KEYS.includes(k)) return undefined;
+      if (v && v.type === 'group' && v.kind === 'modifier' && !v.modOn && !v.modOff && !v.isolated) return { ...v, kind: 'noncapture' };
       return v && v.type === 'uprop' && !v.js ? { ...v, js: { prop: v.value } } : v;
     });
   }
@@ -1198,6 +1233,12 @@
       }
       if (used.backref && (from === 'js') !== (to === 'js')) {
         reasons.push(to === 'js' ? '一致しなかったグループを参照すると、空文字列として一致します' : '一致しなかったグループを参照すると、その参照は失敗します');
+      }
+      // JavaScript だけが、繰り返しの回ごとにグループの値を消す（repeatedOptionalGroups）
+      if (used.repeatGroup && (from === 'js') !== (to === 'js')) {
+        reasons.push(to === 'js'
+          ? '繰り返しの中のグループの値が回ごとに消え、その回に一致しなければ値がなくなります（(?:(a)|b)+ を ab に使うと、グループ 1 はなし）'
+          : '繰り返しの中のグループに、その回に一致しなくても前の回の値が残ります（(?:(a)|b)+ を ab に使うと、グループ 1 は a）');
       }
       if (used.named && used.numbered && (from === 'cs') !== (to === 'cs')) {
         reasons.push('名前付きのグループと名前なしのグループを混ぜたときの、グループの番号の付け方が違います');
