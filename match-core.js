@@ -249,7 +249,8 @@
 
   // サクラエディタ本体の探し方（v2.4.2 の CSearchAgent::SearchWord）。1 行ずつ、行末の改行（CRLF、LF、CR）を含めた文字列で探す。
   // 探し始める位置は行末の改行の前までに限る。長さ 0 の一致のあとは 1 文字（サロゲートペアは 2 単位）進める
-  function findAllPerLine(source, flags, text, max, groupMap) {
+  // dropMid が true なら、絵文字などの途中の長さ 0 の一致を飛ばす（findAll と同じ）
+  function findAllPerLine(source, flags, text, max, groupMap, dropMid = false) {
     const re = compile(source, flags.includes('g') ? flags : `${flags}g`);
     const global = flags.includes('g');
     const matches = [];
@@ -261,6 +262,7 @@
         re.lastIndex = pos;
         const m = re.exec(line);
         if (!m) break;
+        if (dropMid && !m[0] && midPair(line, m.index)) { pos = m.index + 1; continue; }
         const packed = pack(m, groupMap);
         packed.index += lm.index;
         if (packed.ranges) packed.ranges = packed.ranges.map((r) => (r ? [r[0] + lm.index, r[1] + lm.index] : null));
@@ -274,11 +276,15 @@
     return matches;
   }
 
+  // i が、サロゲートペア（絵文字など）の 2 つの単位の間か
+  const midPair = (s, i) => i > 0 && i < s.length && s.charCodeAt(i - 1) >= 0xd800 && s.charCodeAt(i - 1) <= 0xdbff
+    && s.charCodeAt(i) >= 0xdc00 && s.charCodeAt(i) <= 0xdfff;
+
   // lines を渡すと、各行を別々の文字列として調べ、一致したかを lineHits に入れる
   function findAll(source, flags, text, max, lines, groupMap, emptyMode = '', program = null) {
     if (program && program.perLine) {
       const lineHits = lines ? findAll(source, flags, '', 0, lines, groupMap).lineHits : null;
-      return { matches: findAllPerLine(source, flags, text, max, groupMap), lineHits };
+      return { matches: findAllPerLine(source, flags, text, max, groupMap, !!program.codePoints), lineHits };
     }
     if (program && program.states) {
       try {
@@ -309,7 +315,10 @@
       const hits = lines ? findAll(source, flags, '', 0, lines, groupMap).lineHits : null;
       return { matches, lineHits: hits && lineOk ? hits.map((h, k) => h && !!lineOk([...lines[k]], 0)) : hits };
     }
-    const re = compile(source, flags);
+    // 文字の単位で探す言語では、絵文字などの途中（UTF-16 の 2 つの単位の間）の長さ 0 の一致を出さない（translate.js の codePoints）。
+    // g フラグがないときも、途中の一致を飛ばして最初の一致を探すため、g を付けて探す
+    const dropMid = !!(program && program.codePoints);
+    const re = compile(source, dropMid && !flags.includes('g') ? `${flags}g` : flags);
     let matches = [];
     if (re.global && emptyMode) {
       matches = findAllEmptyAware(re, source, flags, text, max, groupMap, emptyMode);
@@ -321,6 +330,10 @@
     } else {
       const m = re.exec(text);
       if (m) matches.push(pack(m, groupMap));
+    }
+    if (dropMid) {
+      matches = matches.filter((m) => m.text || !midPair(text, m.index));
+      if (!flags.includes('g')) matches = matches.slice(0, 1);
     }
     let lineHits = null;
     if (lines) {

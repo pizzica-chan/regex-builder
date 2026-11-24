@@ -1023,7 +1023,7 @@
   // テストの欄で、JavaScript に置き換えて動かすときの注意
   function renderNotes() {
     const el = $('dialect-notes');
-    const notes = isJs() || !patternEl.value ? [] : [...translateNotes, ...Translate.textNotes(testEl.value, dialect)];
+    const notes = isJs() || !patternEl.value ? [] : [...translateNotes, ...Translate.textNotes(testEl.value, dialect, lastCanBeEmpty)];
     el.hidden = !notes.length;
     el.innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
   }
@@ -1100,6 +1100,8 @@
   // POSIX のときの状態機械（translate.js の buildProgram）。いちばん長い一致を探すのに使う
   let lastProgram = null;
   let translateNotes = [];
+  // 正規表現が長さ 0 の文字列に一致し得るか（テスト文字列による注意に使う）
+  let lastCanBeEmpty = false;
   let untestable = '';
 
   function update() {
@@ -1111,6 +1113,7 @@
     lastMap = null;
     lastProgram = null;
     translateNotes = [];
+    lastCanBeEmpty = false;
     untestable = '';
     pv.errPos = null;
     if (!src) {
@@ -1131,6 +1134,7 @@
         lastMap = t.groupMap;
         lastProgram = t.program || null;
         translateNotes = t.notes;
+        lastCanBeEmpty = t.canBeEmpty;
         showError('');
       } catch (e) {
         if (e instanceof RegexParseError) {

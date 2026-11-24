@@ -349,6 +349,7 @@
     };
     const checkProp = (it) => { const cls = propClass(it); if (cls && !hasCasedProp && foldChanges(cls)) hasCasedProp = true; };
     let hasBackref = false;
+    let hasWordAnchor = false; // \b \B \< \>
     const repeats = []; // 2 回以上繰り返す部分（後方参照が、前の回のグループの値を使えるか）
     (function walk(n) {
       switch (n.type) {
@@ -369,6 +370,7 @@
           walk(n.target);
           break;
         case 'backref': hasBackref = true; break;
+        case 'anchor': if (/wordb|wordStart|wordEnd/.test(n.kind)) hasWordAnchor = true; break;
         case 'group':
           if (n.kind === 'modifier' && /i/.test(n.modOn + n.modOff)) scopedCase = true;
           if (n.kind === 'atomic') n.jsExtra = ++next;
@@ -395,7 +397,15 @@
     // POSIX で、後方参照を状態機械で探せないとき（正規表現が大きいとき）の注意
     const POSIX_REF_CASE_NOTE = '後方参照があるので、大文字と小文字を区別しない比べ方は、テストの欄では JavaScript の i フラグの決まりにしています。ケルビン記号（U+212A）と k のように、grep では別とみなす文字も同じとみなします。';
     let caseMode = backrefFirst ? '' : asciiCase ? 'ascii' : ['cs', 'python'].includes(dialect) ? dialect : posix ? 'posix' : '';
-    let useJsI = topI && !scopedCase && !caseMode && !(propNoFold && hasCasedProp);
+    // JavaScript の i フラグ（v フラグあり）は、\b の単語の文字にも効き、ケルビン記号（U+212A）と ſ を [A-Za-z] の単語の文字とみなす。
+    // Go の \b は、大文字と小文字を区別しない指定があっても ASCII の英数字と _ だけで決まる（実際の結果）ので、i フラグを使わない
+    const wordFolds = () => {
+      const cls = `[${D.set('word', dialect)}]`;
+      const plainRe = new RegExp(`^${cls}$`, 'v');
+      const foldRe = new RegExp(`^${cls}$`, 'iv');
+      return casedChars().some((ch) => plainRe.test(ch) !== foldRe.test(ch));
+    };
+    let useJsI = topI && !scopedCase && !caseMode && !(propNoFold && hasCasedProp) && !(hasWordAnchor && !backrefFirst && wordFolds());
     if (asciiCase && (topI || scopedCase)) {
       notes.add(useJsI
         ? 'Java の大文字と小文字を区別しない指定は英字（A〜Z、a〜z）だけに効きますが、後方参照があるので、テストの欄では英字以外（é と É など）も区別しないで比べています。'
@@ -435,7 +445,8 @@
       switch (kind) {
         case 'start':
           if (!ctx.m) return '(?<![^])';
-          if (java) return '(?:(?<![^])|(?:(?<=[\\u{a}\\u{85}\\u{2028}\\u{2029}])|(?<=\\u{d})(?!\\u{a}))(?=[^]))';
+          // Java の複数行のモードの ^ は、文字列の末尾には一致しない。文字列が空なら、先頭にも一致しない（実際の結果）
+          if (java) return '(?:(?<![^])|(?<=[\\u{a}\\u{85}\\u{2028}\\u{2029}])|(?<=\\u{d})(?!\\u{a}))(?=[^])';
           // PHP とサクラエディタは、文字列が改行で終わるとき、その改行のあと（文字列の末尾）には一致しない
           return D.caretNotAtEnd(dialect) ? '(?:(?<![^])|(?<=\\u{a})(?=[^]))' : '(?:(?<![^])|(?<=\\u{a}))';
         case 'end':
@@ -836,7 +847,12 @@
     }
     // サクラエディタ本体は 1 行ずつ（行末の改行を含めて）正規表現に渡す。match-core.js の findAllPerLine で、同じように探す
     if (dialect === 'sakura') program = { perLine: true };
-    return { source, flags: jsFlags, groupMap, groupCount, notes: [...notes], program };
+    // 文字（コードポイント）の単位で探す言語では、絵文字などの途中（UTF-16 の 2 つの単位の間）に長さ 0 の一致を出さない。
+    // V8 は v フラグでも、位置だけを確かめる正規表現（(?![^]) や \B の置き換え）を、絵文字の途中でも試して一致を出す（Node.js 22 の実際の結果）。
+    // C# と PowerShell は UTF-16 の単位で探すので、途中にも出す
+    if (!D.codeUnits(dialect) && !posix) program = { ...(program || {}), codePoints: true };
+    // Java は、長さ 0 の一致のあと UTF-16 の 1 単位だけ進むので、絵文字などの途中にも長さ 0 の一致を出すことがある（textNotes で知らせる）
+    return { source, flags: jsFlags, groupMap, groupCount, notes: [...notes], program, canBeEmpty: minWidth(ast) === 0 };
 
     // 構文木を、状態の並びにする。状態は c（1 文字を読む。re はその文字に一致する JavaScript の正規表現）、
     // s（a と b のどちらにも進む）、a（位置の確かめ。k は種類）、m（一致）。どれも next か a・b で次の状態の番号を持つ。
@@ -910,11 +926,16 @@
   }
 
   // テスト文字列の中身によって出す注意
-  function textNotes(text, dialect) {
+  // canBeEmpty は、正規表現が長さ 0 の文字列に一致し得るか（translate の結果）
+  function textNotes(text, dialect, canBeEmpty = false) {
     const D = global.RegexDialects;
     const out = [];
-    if (D.codeUnits(dialect) && /[\u{10000}-\u{10ffff}]/u.test(text)) {
+    const astral = /[\u{10000}-\u{10ffff}]/u.test(text);
+    if (D.codeUnits(dialect) && astral) {
       out.push(`${D.get(dialect).name} は絵文字などを 2 文字として数えますが、テストの欄では 1 文字として数えます。. や長さの指定を含む一致は、結果が変わることがあります。`);
+    }
+    if (D.engine(dialect) === 'java' && astral && canBeEmpty) {
+      out.push('Java は、長さ 0 の一致を、絵文字などの途中（UTF-16 の 2 つの単位の間）にも出すことがあります。テストの欄では出しません。');
     }
     return out;
   }
