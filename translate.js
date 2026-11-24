@@ -280,6 +280,17 @@
     return out;
   }
 
+  // ^ を含む部分を、+ や {2} など（* と ? と {1} 以外）で繰り返しているか。GNU grep（UTF-8 のロケール）は、
+  // この形で一致するはずの行を選ばないことがある（(A|(^\w+)){2} は AAx の行を選ばない。Ubuntu 24.04 の grep 3.11 の実際の結果）
+  function caretInRepeat(ast) {
+    return (function find(n, rep) {
+      if (!n || typeof n !== 'object') return false;
+      if (n.type === 'anchor' && n.kind === 'start' && rep) return true;
+      const inRep = rep || (n.type === 'quant' && n.max >= 2 && !(n.min === 0 && n.max === Infinity));
+      return ['items', 'alts', 'body', 'target'].some((k) => (Array.isArray(n[k]) ? n[k].some((x) => find(x, inRep)) : find(n[k], inRep)));
+    })(ast, false);
+  }
+
   // 否定の先読み・後読みの中に、グループがあるか（Java は、成り立たなかったときの値を残す）
   function captureInNegLook(ast) {
     return (function find(n, neg) {
@@ -458,7 +469,8 @@
         case 'strEnd': return atEnd;
         case 'strEndNl': return beforeFinal;
         case 'wordb': return `(?:(?<=${boundaryClass})(?!${boundaryClass})|(?<!${boundaryClass})(?=${boundaryClass}))`;
-        case 'nonwordb': return `(?:(?<=${boundaryClass})(?=${boundaryClass})|(?<!${boundaryClass})(?!${boundaryClass}))`;
+        // Python 3.13 の \B は、空の文字列には一致しない（公式の資料と実際の結果。3.14 からは一致する）
+        case 'nonwordb': return `${dialect === 'python' ? '(?!(?<![^])(?![^]))' : ''}(?:(?<=${boundaryClass})(?=${boundaryClass})|(?<!${boundaryClass})(?!${boundaryClass}))`;
         // GNU の \< と \>（単語の始まりと終わり）
         case 'wordStart': return `(?<!${wordClass})(?=${wordClass})`;
         case 'wordEnd': return `(?<=${wordClass})(?!${wordClass})`;
@@ -841,6 +853,10 @@
         notes.delete(REPEAT_GROUP_NOTE);
         if (groupCount) notes.add('グループの位置は、テストの欄では JavaScript の決まりで求めるので、POSIX の決まりと違うことがあります（一致の範囲は POSIX と同じ）。');
         if (program.refs && program.fold) notes.add('大文字と小文字を区別しない後方参照は、ȿ（U+023F）のように大文字にするとバイト数が増える文字があると、grep では一致しないことがあります（glibc の欠陥）。テストの欄では、意味どおりに一致させます。');
+        // GNU grep の不具合（caretInRepeat）
+        if (caretInRepeat(ast)) {
+          notes.add('grep には、^ を含む部分を + や {2} などで繰り返すと、一致するはずの行を選ばないことがある不具合があります（UTF-8 のロケール）。テストの欄では、意味どおりに一致させます。');
+        }
       } else {
         notes.add('正規表現が大きいので、テストの欄ではいちばん長い一致ではなく、JavaScript と同じく左から順に試して最初に成り立った一致を出します。');
       }
@@ -953,6 +969,7 @@
     f.repeatGroup = repeatedOptionalGroups(ast).size > 0;
     f.repeatSelfRef = repeatedSelfRefGroups(ast).size > 0;
     f.negLookGroup = captureInNegLook(ast);
+    f.caretRepeat = caretInRepeat(ast);
     const withMod = (ctx, on, off) => {
       const c = { ...ctx };
       for (const x of 'ims') { if (on.includes(x)) c[x] = true; if (off.includes(x)) c[x] = false; }
@@ -1023,6 +1040,7 @@
           break;
         case 'anchor':
           if (n.kind === 'wordb' || n.kind === 'nonwordb') f.word = true;
+          if (n.kind === 'nonwordb') f.nonWordb = true;
           if (n.kind === 'end' && !ctx.m) f.dollar = true;
           if (n.kind === 'strEndNl') f.endNl = true;
           if ((n.kind === 'start' || n.kind === 'end') && ctx.m) f.lineAnchor = true;
@@ -1266,6 +1284,9 @@
       }
       // GNU grep（glibc）は、大文字と小文字を区別しない後方参照で、大文字にするとバイト数が増える文字（ȿ など 18 文字）があると、
       // 意味どおりに一致しないことがある（docs/dialects/posix.md）
+      if (used.caretRepeat && D.isPosix(from) !== D.isPosix(to)) {
+        reasons.push('grep は、^ を含む部分を + や {2} などで繰り返すと、一致するはずの行を選ばないことがあります（UTF-8 のロケールでの不具合）');
+      }
       if (used.caseRef && D.isPosix(from) !== D.isPosix(to)) {
         reasons.push('grep は、大文字と小文字を区別しない後方参照で、ȿ のように大文字にするとバイト数が増える文字があると、一致しないことがあります');
       }
@@ -1323,6 +1344,10 @@
       } else if (used.canBeEmpty && (from === 'java') !== (to === 'java') && !D.isPosix(from) && !D.isPosix(to)) {
         // Java は長さ 0 の一致のあと UTF-16 の 1 単位だけ進む（tools/dialect-probe の \x{1F600}??）
         minor.push(to === 'java' ? '長さ 0 の一致が、絵文字などの途中にも出ます' : '長さ 0 の一致が、絵文字などの途中には出ません');
+      }
+      // Python 3.13 の \B は、空の文字列には一致しない
+      if (used.nonWordb && (from === 'python') !== (to === 'python')) {
+        minor.push(to === 'python' ? '\\B が、空の文字列には一致しません' : '\\B が、空の文字列にも一致します');
       }
       if (used.astral && D.codeUnits(from) !== D.codeUnits(to)) {
         minor.push(D.codeUnits(to) ? '絵文字などを 2 文字として数えます（. や [^…] が絵文字の半分に一致します）' : '絵文字などを 1 文字として数えます');

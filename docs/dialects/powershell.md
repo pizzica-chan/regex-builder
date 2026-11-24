@@ -13,7 +13,7 @@
 
 ## C# との照らし合わせ
 
-PowerShell 7.7 で、[cases.json](../../tools/dialect-probe/cases.json) の 267 の事例と、[probes.json](../../tools/dialect-probe/probes.json) の書き方の可否を調べました（`match-ps.ps1` と `probe-ps.ps1`）。どれも C#（.NET 7）と同じ結果でした。
+PowerShell 7.7 で、[cases.json](../../tools/dialect-probe/cases.json) の 269 の事例と、[probes.json](../../tools/dialect-probe/probes.json) の書き方の可否を調べました（`match-ps.ps1` と `probe-ps.ps1`）。どれも C#（.NET 7）と同じ結果でした。
 
 違ったのは、`\w` に一致する文字のうち、Unicode の新しい版で増えた 10 文字（U+0897、U+0ECE、U+1C89、U+1C8A、U+A7CB〜U+A7CD、U+A7DA〜U+A7DC）だけです。.NET 11 のほうが新しい Unicode を使うためです。
 
@@ -28,7 +28,7 @@ PowerShell 7.7 で、[cases.json](../../tools/dialect-probe/cases.json) の 267 
 | `Select-String` | 区別しない | `Select-String -CaseSensitive` |
 | `[regex]::Match()` など | 区別する | （.NET の API をそのまま呼ぶ） |
 
-- 演算子と `Select-String` は `RegexOptions.IgnoreCase` を付けた .NET の Regex と同じ結果になりました。267 の事例のすべてで、`-match`、`-cmatch`、`Select-String -AllMatches` の結果を比べました（`match-ps.ps1 -Check`）。`-replace`、`-split`、`switch -Regex` も、`b` で `aBc` の `B` に一致しました（実際の結果）
+- 演算子と `Select-String` は `RegexOptions.IgnoreCase` を付けた .NET の Regex と同じ結果になりました。269 の事例のすべてで、`-match`、`-cmatch`、`Select-String -AllMatches` の結果を比べました（`match-ps.ps1 -Check`）。`-replace`、`-split`、`switch -Regex` も、`b` で `aBc` の `B` に一致しました（実際の結果）
 - 演算子には複数行のモード（Multiline）と、`.` を改行にも一致させるモード（Singleline）の指定がありません。`'(?ms)^a.b'` のように、正規表現の先頭に書きます。`-split` だけは `-split 'b', 0, 'Multiline'` のようにオプションを渡せます
 - 大文字と小文字の比べ方は、C# と同じく、カルチャ（言語や地域の設定）で変わります。トルコ語（tr-TR）では、`'I' -match 'i'` が成り立ちません。同じセッションで先に同じ正規表現を使っていると、カルチャを変えても結果が変わりませんでした（実際の結果）。照らし合わせは日本語（ja-JP）の設定で行いました
 - 左辺が文字列 1 つのとき、`$Matches` には `-match` の最初の一致だけが入ります。左辺が配列のときは、一致した要素の配列が返り、`$Matches` には何も入りません（実際の結果）。すべての一致は `Select-String -AllMatches` か `[regex]::Matches()` で取り出します
