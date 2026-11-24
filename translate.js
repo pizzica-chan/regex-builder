@@ -280,8 +280,10 @@
     return out;
   }
 
-  // ^ を含む部分を、+ や {2} など（* と ? と {1} 以外）で繰り返しているか。GNU grep（UTF-8 のロケール）は、
-  // この形で一致するはずの行を選ばないことがある（(A|(^\w+)){2} は AAx の行を選ばない。Ubuntu 24.04 の grep 3.11 の実際の結果）
+  // ^ を含む部分を、+ や {2} など（* と ? と {1} 以外）で繰り返しているか。glibc の正規表現は、この形で一致を誤る
+  // （(^a)+ を aa に使うと、正しくは 0〜1 文字目だが、regexec はグループの位置を求めないと 0〜2 文字目、求めると一致なしを返す）。
+  // そのため grep -o と sed は一致を出さず、UTF-8 のロケールの grep は行も選ばない（(A|(^\w+)){2} は AAx の行を選ばない。
+  // Ubuntu 24.04 の grep 3.11、sed 4.9、glibc 2.39 の実際の結果）
   function caretInRepeat(ast) {
     return (function find(n, rep) {
       if (!n || typeof n !== 'object') return false;
@@ -291,13 +293,13 @@
     })(ast, false);
   }
 
-  // 否定の先読み・後読みの中に、グループがあるか（Java は、成り立たなかったときの値を残す）
-  function captureInNegLook(ast) {
-    return (function find(n, neg) {
+  // 先読み・後読みの中に、グループがあるか（Java は、先読み・後読みの中のグループの値を、戻って試し直したあとも残す）
+  function captureInLook(ast) {
+    return (function find(n, inLook) {
       if (!n || typeof n !== 'object') return false;
-      if (n.type === 'group' && n.index && neg) return true;
-      const inNeg = neg || (n.type === 'group' && /^neglook/.test(n.kind));
-      return ['items', 'alts', 'body', 'target'].some((k) => (Array.isArray(n[k]) ? n[k].some((x) => find(x, inNeg)) : find(n[k], inNeg)));
+      if (n.type === 'group' && n.index && inLook) return true;
+      const deeper = inLook || (n.type === 'group' && /look/.test(n.kind));
+      return ['items', 'alts', 'body', 'target'].some((k) => (Array.isArray(n[k]) ? n[k].some((x) => find(x, deeper)) : find(n[k], deeper)));
     })(ast, false);
   }
 
@@ -428,10 +430,11 @@
     const REPEAT_GROUP_NOTE = `繰り返しの中のグループは、この言語では、その回に一致しなくても前の回の値が残りますが、テストの欄では回ごとに値が消えます（(?:(a)|b)+ を ab に使うと、この言語のグループ 1 は a、テストの欄ではなし）。表のグループの値${D.can(dialect, 'backref') || posix ? 'や、そのグループへの後方参照の一致' : ''}が変わることがあります。`;
     // グループの中からの参照（(a|b\1)+）も、前の回の値と比べる。サクラエディタは参照がいつも失敗する（下の emit の backref で扱う）
     if (repeatedOptionalGroups(ast).size || (dialect !== 'sakura' && repeatedSelfRefGroups(ast).size)) notes.add(REPEAT_GROUP_NOTE);
-    // Java は、否定の先読み・後読みの中のグループに、その先読み・後読みが成り立たなかったとき（中身が一致したとき）の値を残す。
-    // 残った値は、あとの一致のグループの値にも、後方参照にも使われる（(?<!(a))b\1 は ab ba の ba に一致する。実際の結果）
-    if (dialect === 'java' && captureInNegLook(ast)) {
-      notes.add('Java は、否定の先読み・後読み（(?!…) と (?<!…)）の中のグループに、それが成り立たなかったときの値を残します。テストの欄では値を残さないので、表のグループの値や、そのグループへの後方参照の一致が変わることがあります。');
+    // Java は、先読み・後読みの中のグループの値を、その先読み・後読みのあとで戻って試し直したときや、否定の先読み・後読みが
+    // 成り立たなかったとき（中身が一致したとき）にも残す。残った値は、あとの一致のグループの値にも、後方参照にも使われる
+    // （(?:(?=(a))b|a) を a に使うとグループ 1 は a、(?<!(a))b\1 は ab ba の ba に一致する。Java 21 の実際の結果。JDK-8187083 と同じ系統）
+    if (dialect === 'java' && captureInLook(ast)) {
+      notes.add('Java は、先読み・後読みの中のグループの値を、あとで戻って試し直したときや、否定の先読み・後読みが成り立たなかったときにも残すことがあります。テストの欄では値を残さないので、表のグループの値や、そのグループへの後方参照の一致が変わることがあります。');
     }
 
     // ---------- 2 回目: 書き出す ----------
@@ -855,7 +858,7 @@
         if (program.refs && program.fold) notes.add('大文字と小文字を区別しない後方参照は、ȿ（U+023F）のように大文字にするとバイト数が増える文字があると、grep では一致しないことがあります（glibc の欠陥）。テストの欄では、意味どおりに一致させます。');
         // GNU grep の不具合（caretInRepeat）
         if (caretInRepeat(ast)) {
-          notes.add('grep には、^ を含む部分を + や {2} などで繰り返すと、一致するはずの行を選ばないことがある不具合があります（UTF-8 のロケール）。テストの欄では、意味どおりに一致させます。');
+          notes.add('^ を含む部分を + や {2} などで繰り返すと、glibc の正規表現の欠陥で、grep -o は一致を出さず、UTF-8 のロケールの grep は一致するはずの行を選ばないことがあります。テストの欄では、意味どおりに一致させます。');
         }
       } else {
         notes.add('正規表現が大きいので、テストの欄ではいちばん長い一致ではなく、JavaScript と同じく左から順に試して最初に成り立った一致を出します。');
@@ -864,8 +867,11 @@
     // サクラエディタ本体は 1 行ずつ（行末の改行を含めて）正規表現に渡す。match-core.js の findAllPerLine で、同じように探す
     if (dialect === 'sakura') program = { perLine: true };
     // 文字（コードポイント）の単位で探す言語では、絵文字などの途中（UTF-16 の 2 つの単位の間）に長さ 0 の一致を出さない。
-    // V8 は v フラグでも、位置だけを確かめる正規表現（(?![^]) や \B の置き換え）を、絵文字の途中でも試して一致を出す（Node.js 22 の実際の結果）。
-    // C# と PowerShell は UTF-16 の単位で探すので、途中にも出す
+    // V8 は v フラグでも、否定の先読み・後読み（(?![^]) や \B の置き換え）を、絵文字の途中でも試して一致を出す（Node.js 22 の実際の結果）。
+    // これは V8 の不具合で、仕様（RegExpBuiltinExec と AdvanceStringIndex）ではコードポイントの単位で進む。
+    // 2026-06-09 に V8 の main で直された（https://chromium-review.googlesource.com/c/v8/v8/+/7882029）。
+    // C# と PowerShell は UTF-16 の単位で探すので、途中の一致を捨てない。ただし直った V8 では、途中の一致そのものが出ない
+    // （C# との違いは、絵文字などを 2 文字として数える注意で知らせる）
     if (!D.codeUnits(dialect) && !posix) program = { ...(program || {}), codePoints: true };
     // Java は、長さ 0 の一致のあと UTF-16 の 1 単位だけ進むので、絵文字などの途中にも長さ 0 の一致を出すことがある（textNotes で知らせる）
     return { source, flags: jsFlags, groupMap, groupCount, notes: [...notes], program, canBeEmpty: minWidth(ast) === 0 };
@@ -968,7 +974,7 @@
     const groups = groupInfo(ast);
     f.repeatGroup = repeatedOptionalGroups(ast).size > 0;
     f.repeatSelfRef = repeatedSelfRefGroups(ast).size > 0;
-    f.negLookGroup = captureInNegLook(ast);
+    f.lookGroup = captureInLook(ast);
     f.caretRepeat = caretInRepeat(ast);
     const withMod = (ctx, on, off) => {
       const c = { ...ctx };
@@ -1285,7 +1291,7 @@
       // GNU grep（glibc）は、大文字と小文字を区別しない後方参照で、大文字にするとバイト数が増える文字（ȿ など 18 文字）があると、
       // 意味どおりに一致しないことがある（docs/dialects/posix.md）
       if (used.caretRepeat && D.isPosix(from) !== D.isPosix(to)) {
-        reasons.push('grep は、^ を含む部分を + や {2} などで繰り返すと、一致するはずの行を選ばないことがあります（UTF-8 のロケールでの不具合）');
+        reasons.push('grep は、^ を含む部分を + や {2} などで繰り返すと、glibc の正規表現の欠陥で、一致を出さなかったり、一致するはずの行を選ばなかったりすることがあります');
       }
       if (used.caseRef && D.isPosix(from) !== D.isPosix(to)) {
         reasons.push('grep は、大文字と小文字を区別しない後方参照で、ȿ のように大文字にするとバイト数が増える文字があると、一致しないことがあります');
@@ -1362,10 +1368,10 @@
           ? '繰り返しの中のグループの値が回ごとに消え、その回に一致しなければ値がなくなります（(?:(a)|b)+ を ab に使うと、グループ 1 はなし）'
           : '繰り返しの中のグループに、その回に一致しなくても前の回の値が残ります（(?:(a)|b)+ を ab に使うと、グループ 1 は a）');
       }
-      if (used.negLookGroup && (from === 'java') !== (to === 'java')) {
+      if (used.lookGroup && (from === 'java') !== (to === 'java')) {
         reasons.push(to === 'java'
-          ? '否定の先読み・後読みの中のグループに、それが成り立たなかったときの値が残ります（(?<!(a))b を ab b に使うと、一致した 2 つ目の b のグループ 1 は、手前で試した a）'
-          : '否定の先読み・後読みの中のグループに、それが成り立たなかったときの値は残りません');
+          ? '先読み・後読みの中のグループの値が、戻って試し直したあとや、否定の先読み・後読みが成り立たなかったときにも残ることがあります（(?<!(a))b を ab b に使うと、一致した 2 つ目の b のグループ 1 は、手前で試した a）'
+          : '先読み・後読みの中のグループの値は、戻って試し直したあとや、否定の先読み・後読みが成り立たなかったときには残りません');
       }
       if (used.named && used.numbered && (from === 'cs') !== (to === 'cs')) {
         reasons.push('名前付きのグループと名前なしのグループを混ぜたときの、グループの番号の付け方が違います');
