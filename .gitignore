@@ -5,3 +5,5 @@ tools/dialect-probe/cs/bin/
 tools/dialect-probe/cs/obj/
 tools/dialect-probe/cs-match/bin/
 tools/dialect-probe/cs-match/obj/
+# fuzz.js が作る無作為の事例と、処理系で動かした結果
+tools/dialect-probe/fuzz/

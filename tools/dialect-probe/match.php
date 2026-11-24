@@ -1,6 +1,7 @@
 <?php
 // cases.json の各正規表現を PHP の preg（u 修飾子あり）で動かし、一致した位置（UTF-8 のバイト単位）を JSON で出す
-$cases = json_decode(file_get_contents(__DIR__ . '/cases.json'), true);
+// 使い方: php match.php [事例のファイル]（省くと、このフォルダの cases.json）
+$cases = json_decode(file_get_contents($argv[1] ?? __DIR__ . '/cases.json'), true);
 $results = [];
 foreach ($cases as $c) {
     $re = "\x01" . $c['p'] . "\x01" . $c['f'] . 'u';

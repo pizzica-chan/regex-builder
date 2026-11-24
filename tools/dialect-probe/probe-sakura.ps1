@@ -1,7 +1,8 @@
 ﻿# サクラエディタの正規表現ライブラリ（bregonig.dll）で probes.json の各正規表現を試し、結果を JSON で出す。
 # bregonig.dll は 32 ビットなので、32 ビットの Windows PowerShell で動かす:
 #   C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -NoProfile -File probe-sakura.ps1 <bregonig.dll のパス>
-param([Parameter(Mandatory = $true)][string]$DllPath, [string]$Explain, [string]$Text = 'A', [switch]$Cases)
+# -Cases で事例の一致を調べるとき、-CasesPath で事例のファイルを選べる（省くと、このフォルダの cases.json）
+param([Parameter(Mandatory = $true)][string]$DllPath, [string]$Explain, [string]$Text = 'A', [switch]$Cases, [string]$CasesPath)
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -159,7 +160,8 @@ if ($Explain) {
 
 # -Cases を付けると、cases.json の各正規表現の一致の位置（UTF-16 単位）を出す
 if ($Cases) {
-    $list = Get-Content -Raw -Encoding UTF8 (Join-Path $here 'cases.json') | ConvertFrom-Json
+    $file = if ($CasesPath) { $CasesPath } else { Join-Path $here 'cases.json' }
+    $list = Get-Content -Raw -Encoding UTF8 $file | ConvertFrom-Json
     $results = @()
     foreach ($c in $list) {
         # サクラエディタ本体と同じく、. と $ を置き換えてから（EditorPattern）、1 行ずつ探す（MatchLines）。

@@ -57,7 +57,7 @@ POSIX の ERE と BRE（GNU grep）は、いちばん左で、いちばん長い
 | `match-core.js` | テスト文字列との一致を調べる処理。`match-worker.js` と `app.js` の両方から使う |
 | `match-worker.js` | `match-core.js` の処理を、画面とは別の処理（Web Worker）で動かす |
 | `docs/dialects/` | 10 の方言の正規表現の仕様の資料 |
-| `tools/dialect-probe/` | 各言語の処理系で正規表現を実際に動かして調べる道具と、その結果。`run-all.ps1` で全部の言語を動かし、`verify.js` で「テスト」の欄の置き換えと照らし合わせる。`verify-portability.js` で、「ほかの言語で使うと」が「同じ意味」とした言語の組の処理系の一致が本当に同じか、「書けない」とした言語の処理系が本当に誤りにするかを確かめる |
+| `tools/dialect-probe/` | 各言語の処理系で正規表現を実際に動かして調べる道具と、その結果。`run-all.ps1` で全部の言語を動かし、`verify.js` で「テスト」の欄の置き換えと照らし合わせる。`verify-portability.js` で、「ほかの言語で使うと」が「同じ意味」とした言語の組の処理系の一致が本当に同じか、「書けない」とした言語の処理系が本当に誤りにするかを確かめる。`fuzz.js` で無作為に正規表現と文字列を作り、`run-all.ps1 -CasesPath` で各言語の処理系で動かして、「テスト」の欄と比べる（使い方は `fuzz.js` の冒頭） |
 | `tools/test/` | JavaScript のモードの説明が変わっていないかを確かめる `js-regression.js`、「コード例」を各言語の処理系で動かし、「テスト」の欄と同じ一致を出すかを確かめる `sample-programs.js`、説明や比較を目で確かめる道具 |
 | `favicon.svg`、`favicon.ico`、`apple-touch-icon.png` | ブラウザのタブやホーム画面に出るアイコン。`.ico` と `.png` は `python tools/make_favicons.py` で `favicon.svg` と同じ図形から作る（Pillow が要る） |
 

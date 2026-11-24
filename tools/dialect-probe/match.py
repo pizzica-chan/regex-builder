@@ -1,4 +1,7 @@
-"""cases.json の各正規表現を Python の re で動かし、一致した位置（コードポイント単位）を JSON で出す。"""
+"""cases.json の各正規表現を Python の re で動かし、一致した位置（コードポイント単位）を JSON で出す。
+
+使い方: python -I match.py [事例のファイル]（省くと、このフォルダの cases.json）
+"""
 import json
 import re
 import sys
@@ -20,6 +23,6 @@ def run(case):
     return [[m.start(), m.end()] for m in rx.finditer(case['s'])][:100]
 
 
-cases = json.loads((HERE / 'cases.json').read_text(encoding='utf-8'))
+cases = json.loads(Path(sys.argv[1] if len(sys.argv) > 1 else HERE / 'cases.json').read_text(encoding='utf-8'))
 out = {'unit': 'cp', 'results': [run(c) for c in cases]}
 sys.stdout.buffer.write(json.dumps(out).encode('utf-8'))
