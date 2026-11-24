@@ -252,6 +252,44 @@
     return out;
   }
 
+  // 2 回以上繰り返す部分の中で、グループが閉じる前に、そのグループを参照しているグループの番号（(a|b\1)+ の (a|b\1)）。
+  // JavaScript は回の始めにグループの値を消すので、参照は空文字列として一致する。ほかの言語は、前の回の値と比べる
+  // （Python は書き方の誤り、サクラエディタは参照がいつも失敗する。Java、PHP、C# で確かめた）
+  function repeatedSelfRefGroups(ast) {
+    const groups = [];
+    const refs = [];
+    const reps = [];
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (n.type === 'quant' && n.max > 1) reps.push(n);
+      if (n.type === 'group' && n.index) groups.push(n);
+      if (n.type === 'backref' && n.index) refs.push(n);
+      for (const k of ['items', 'alts', 'body', 'target']) {
+        const v = n[k];
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v) walk(v);
+      }
+    })(ast);
+    const out = new Set();
+    for (const g of groups) {
+      for (const r of refs) {
+        if (r.index !== g.index || r.start >= g.end) continue;
+        if (reps.some((q) => q.start <= Math.min(g.start, r.start) && q.end >= Math.max(g.end, r.end))) out.add(g.index);
+      }
+    }
+    return out;
+  }
+
+  // 否定の先読み・後読みの中に、グループがあるか（Java は、成り立たなかったときの値を残す）
+  function captureInNegLook(ast) {
+    return (function find(n, neg) {
+      if (!n || typeof n !== 'object') return false;
+      if (n.type === 'group' && n.index && neg) return true;
+      const inNeg = neg || (n.type === 'group' && /^neglook/.test(n.kind));
+      return ['items', 'alts', 'body', 'target'].some((k) => (Array.isArray(n[k]) ? n[k].some((x) => find(x, inNeg)) : find(n[k], inNeg)));
+    })(ast, false);
+  }
+
   // 一致しなかったグループを参照するおそれがあるか。参照がグループの終わりより前にある（\1(a) や (a\1)）ときも、
   // 参照する時点ではグループに何も入っていない
   function mayBeUnset(ref, info) {
@@ -367,7 +405,13 @@
     // 繰り返しの中で、回によって一致しないことがあるグループ。JavaScript は回ごとに値を消すが、ほかの言語は前の回の値を残す。
     // JavaScript の正規表現では再現できないので、注意を出す（POSIX は状態機械で探すときは一致の範囲が同じなので、下で消す）
     const REPEAT_GROUP_NOTE = `繰り返しの中のグループは、この言語では、その回に一致しなくても前の回の値が残りますが、テストの欄では回ごとに値が消えます（(?:(a)|b)+ を ab に使うと、この言語のグループ 1 は a、テストの欄ではなし）。表のグループの値${D.can(dialect, 'backref') || posix ? 'や、そのグループへの後方参照の一致' : ''}が変わることがあります。`;
-    if (repeatedOptionalGroups(ast).size) notes.add(REPEAT_GROUP_NOTE);
+    // グループの中からの参照（(a|b\1)+）も、前の回の値と比べる。サクラエディタは参照がいつも失敗する（下の emit の backref で扱う）
+    if (repeatedOptionalGroups(ast).size || (dialect !== 'sakura' && repeatedSelfRefGroups(ast).size)) notes.add(REPEAT_GROUP_NOTE);
+    // Java は、否定の先読み・後読みの中のグループに、その先読み・後読みが成り立たなかったとき（中身が一致したとき）の値を残す。
+    // 残った値は、あとの一致のグループの値にも、後方参照にも使われる（(?<!(a))b\1 は ab ba の ba に一致する。実際の結果）
+    if (dialect === 'java' && captureInNegLook(ast)) {
+      notes.add('Java は、否定の先読み・後読み（(?!…) と (?<!…)）の中のグループに、それが成り立たなかったときの値を残します。テストの欄では値を残さないので、表のグループの値や、そのグループへの後方参照の一致が変わることがあります。');
+    }
 
     // ---------- 2 回目: 書き出す ----------
     const wordClass = `[${D.set('word', dialect)}]`;
@@ -886,6 +930,8 @@
     };
     const groups = groupInfo(ast);
     f.repeatGroup = repeatedOptionalGroups(ast).size > 0;
+    f.repeatSelfRef = repeatedSelfRefGroups(ast).size > 0;
+    f.negLookGroup = captureInNegLook(ast);
     const withMod = (ctx, on, off) => {
       const c = { ...ctx };
       for (const x of 'ims') { if (on.includes(x)) c[x] = true; if (off.includes(x)) c[x] = false; }
@@ -1264,10 +1310,16 @@
         reasons.push(to === 'js' ? '一致しなかったグループを参照すると、空文字列として一致します' : '一致しなかったグループを参照すると、その参照は失敗します');
       }
       // JavaScript だけが、繰り返しの回ごとにグループの値を消す（repeatedOptionalGroups）
-      if (used.repeatGroup && (from === 'js') !== (to === 'js')) {
+      // グループの中からの参照（(a|b\1)+）も同じ。サクラエディタとの違いは、selfRef の理由で知らせる
+      if ((used.repeatGroup || (used.repeatSelfRef && from !== 'sakura' && to !== 'sakura')) && (from === 'js') !== (to === 'js')) {
         reasons.push(to === 'js'
           ? '繰り返しの中のグループの値が回ごとに消え、その回に一致しなければ値がなくなります（(?:(a)|b)+ を ab に使うと、グループ 1 はなし）'
           : '繰り返しの中のグループに、その回に一致しなくても前の回の値が残ります（(?:(a)|b)+ を ab に使うと、グループ 1 は a）');
+      }
+      if (used.negLookGroup && (from === 'java') !== (to === 'java')) {
+        reasons.push(to === 'java'
+          ? '否定の先読み・後読みの中のグループに、それが成り立たなかったときの値が残ります（(?<!(a))b を ab b に使うと、一致した 2 つ目の b のグループ 1 は、手前で試した a）'
+          : '否定の先読み・後読みの中のグループに、それが成り立たなかったときの値は残りません');
       }
       if (used.named && used.numbered && (from === 'cs') !== (to === 'cs')) {
         reasons.push('名前付きのグループと名前なしのグループを混ぜたときの、グループの番号の付け方が違います');
