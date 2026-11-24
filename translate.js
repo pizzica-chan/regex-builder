@@ -1099,11 +1099,13 @@
       let parsed;
       try {
         if (to === 'js') {
-          const nj = hasNotInJs(base.ast, src);
-          if (nj) throw new Error(`JavaScript では ${nj}`);
+          // ほかの言語だけの書き方でも、JavaScript（u フラグなし）が誤りにせずに別の意味で読むもの（\A は文字の A、
+          // [[:alpha:]] は [[:alph] と ]）は、書けないとはせず、下で「別の意味に読まれます」と知らせる（Node.js の実際の結果）
           try {
             new RegExp(src, toFlags.replace('g', '')); // eslint-disable-line no-new
           } catch (e) {
+            const nj = hasNotInJs(base.ast, src);
+            if (nj) throw new Error(`JavaScript では ${nj}`);
             // 自前の解析で日本語の説明が作れれば、それを使う
             RE.parse(src, toFlags, 'js');
             throw new Error(`JavaScript では書き方の誤りになります（${e.message}）`);
